@@ -48,3 +48,12 @@ private:
 
 	uint32_t setsPerPool;
 };
+
+struct DescriptorWriter {
+	std::deque<VkDescriptorImageInfo> imageInfos;
+	std::deque<VkDescriptorBufferInfo> bufferInfos;
+	std::vector<VkWriteDescriptorSet> writes;
+
+	void write_image();
+	void write_buffer()
+};
