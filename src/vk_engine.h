@@ -59,17 +59,6 @@ struct ComputeEffect {
 	ComputePushConstants data;
 };
 
-// GLTF Mesh Structs
-struct GeoSurface {
-	uint32_t startIndex;
-	uint32_t count;
-};
-
-struct MeshAsset {
-	std::string name;
-	std::vector<GeoSurface> surfaces;
-	GPUMeshBuffers meshBuffers;
-};
 
 // Scene Data
 struct GPUSceneData {
@@ -162,7 +151,7 @@ public:
 	float renderScale = 1.f;
 
 	// Descriptor Set Structures
-	DescriptorAllocator globalDescriptorAllocator;
+	DescriptorAllocatorGrowable globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
@@ -187,9 +176,6 @@ public:
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
 
-	// Test Meshes
-	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
-
 	// Depth Testing Setup
 	AllocatedImage _depthImage;
 
@@ -205,6 +191,13 @@ public:
 
 	// Image Descriptor Set
 	VkDescriptorSetLayout _singleImageDescriptorLayout;
+
+	// Test Meshes
+	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
+	// Test Material
+	MaterialInstance defaultData;
+	GLTFMetallic_Roughness metalRoughtMaterial;
 	
 	// Initialises Engine
 	void init();

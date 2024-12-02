@@ -10,21 +10,6 @@ struct DescriptorLayoutBuilder {
 	void clear();
 };
 
-struct DescriptorAllocator {
-	struct PoolSizeRatio {
-		VkDescriptorType type;
-		float ratio;
-	};
-
-	VkDescriptorPool pool;
-
-	void init_pool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
-	void clear_descriptors(VkDevice device);
-	void destroy_pool(VkDevice device);
-
-	VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
-};
-
 struct DescriptorAllocatorGrowable {
 public:
 	struct PoolSizeRatio {
@@ -60,3 +45,18 @@ struct DescriptorWriter {
 	void clear();
 	void update_set(VkDevice device, VkDescriptorSet set);
 };
+
+//struct DescriptorAllocator {
+//	struct PoolSizeRatio {
+//		VkDescriptorType type;
+//		float ratio;
+//	};
+//
+//	VkDescriptorPool pool;
+//
+//	void init_pool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
+//	void clear_descriptors(VkDevice device);
+//	void destroy_pool(VkDevice device);
+//
+//	VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
+//};

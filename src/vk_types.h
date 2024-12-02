@@ -60,13 +60,88 @@ struct GPUMeshBuffers {
     VkDeviceAddress vertexBufferAddress;
 };
 
+// Bounds Struct
+struct Bounds {
+    glm::vec3 origin;
+    float sphereRadius;
+    glm::vec3 extents;
+};
+
+// GLTF Material Struct
+struct GLTFMaterial {
+    MaterialInstance data;
+};
+
+// GLTF Mesh Structs
+struct GeoSurface {
+    uint32_t startIndex;
+    uint32_t count;
+
+    Bounds bounds;
+    std::shared_ptr<GLTFMaterial> material;
+};
+
+// Mesh Asset Struct
+struct MeshAsset {
+    std::string name;
+    std::vector<GeoSurface> surfaces;
+    GPUMeshBuffers meshBuffers;
+};
+
+
 // Containts Push Constants for Mesh Data
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
 };
 
-// Mesh Object
+// Dynamic mesh Rendering Structures --------------------------------------------------------------
+
+// Full Draw Context - List of objects
+struct DrawContext;
+
+// Interfaces
+class IRenderable {
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
+};
+
+// Base node Class
+struct Node : public IRenderable {
+
+    // Parent pointer must be a weak pointer to avoid circular dependencies
+    std::weak_ptr<Node> parent;
+
+    // List of children
+    std::vector<std::shared_ptr<Node>> children;
+
+    // Matrix transformations
+    glm::mat4 localTransform;
+    glm::mat4 worldTransform;
+
+    void refreshTransform(const glm::mat4& parentMatrix) {
+        worldTransform = parentMatrix * localTransform;
+        for (auto c : children) {
+            c->refreshTransform(worldTransform);
+        }
+    }
+
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) {
+        // Draw Children
+        for (auto& c : children) {
+            c->Draw(topMatrix, ctx);
+        }
+    }
+};
+
+
+// Mesh Node Object
+struct MeshNode : public Node {
+    std::shared_ptr<MeshAsset> mesh;
+
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
+};
+
+// Render Object
 struct RenderObject {
     uint32_t indexCount;
     uint32_t firstIndex;
@@ -76,6 +151,10 @@ struct RenderObject {
 
     glm::mat4 transform;
     VkDeviceAddress vertexBufferAddress;
+};
+
+struct DrawContext {
+    std::vector<RenderObject> OpaqueSurfaces;
 };
 
 enum class MaterialPass :uint8_t {
@@ -93,9 +172,4 @@ struct MaterialInstance {
     MaterialPipeline* pipeline;
     VkDescriptorSet materialSet;
     MaterialPass passType;
-};
-
-// Interfaces
-class IRenderable {
-    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
 };
