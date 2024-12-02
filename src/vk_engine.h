@@ -37,6 +37,7 @@ struct FrameData {
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
 
+	DescriptorAllocatorGrowable _frameDescriptors;
 	DeletionQueue _deletionQueue;
 };
 
@@ -69,6 +70,50 @@ struct MeshAsset {
 	std::vector<GeoSurface> surfaces;
 	GPUMeshBuffers meshBuffers;
 };
+
+// Scene Data
+struct GPUSceneData {
+	glm::mat4 view;
+	glm::mat4 proj;
+	glm::mat4 viewproj;
+	glm::vec4 ambientColour;
+	glm::vec4 sunlightDirection; // w for sun power
+	glm::vec4 sunlightColour;
+};
+
+// GLTF Loading Structs
+struct GLTFMetallic_Roughness {
+	MaterialPipeline opaquePipeline;
+	MaterialPipeline transparentPipeline;
+
+	VkDescriptorSetLayout materialLayout;
+
+	struct MaterialConstants {
+		glm::vec4 colourFactors;
+		glm::vec4 metalRoughFactors;
+		// Padding for Uniform Buffers
+		glm::vec4 extra[14];
+	};
+
+	struct MaterialResources {
+		AllocatedImage colourImage;
+		VkSampler colourSampler;
+
+		AllocatedImage metalRoughImage;
+		VkSampler metalRoughSampler;
+
+		VkBuffer dataBuffer;
+		uint32_t dataBufferOffset;
+	};
+
+	DescriptorWriter writer;
+
+	void build_pipelines(VulkanEngine* engine);
+	void clear_resources(VkDevice device);
+
+	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
+};
+
 
 // Classes -------------------------------------------------------------------------------
 
@@ -121,13 +166,17 @@ public:
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
+	// Scene Data
+	GPUSceneData sceneData;
+	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
+
 	// Pipeline Structures
 	VkPipeline _gradientPipeline;
 	VkPipelineLayout _gradientPipelineLayout;
 
 	VkPipeline _meshPipeline;
 	VkPipelineLayout _meshPipelineLayout;
-	GPUMeshBuffers rectangle;
+	//GPUMeshBuffers rectangle;
 
 	// Immediate Submit Structures
 	VkFence _immFence;
@@ -143,6 +192,19 @@ public:
 
 	// Depth Testing Setup
 	AllocatedImage _depthImage;
+
+	// Default Textures
+	AllocatedImage _whiteImage;
+	AllocatedImage _blackImage;
+	AllocatedImage _greyImage;
+	AllocatedImage _errorCheckerboardImage;
+
+	// Default Samplers
+	VkSampler _defaultSamplerLinear;
+	VkSampler _defaultSamplerNearest;
+
+	// Image Descriptor Set
+	VkDescriptorSetLayout _singleImageDescriptorLayout;
 	
 	// Initialises Engine
 	void init();
@@ -187,10 +249,16 @@ private:
 	void draw_geometry(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
+	// Image Functions Setup
+	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	void destroy_image(const AllocatedImage& img);
+
 	// Triangle Shader & Mesh Shader
 	void init_triangle_pipeline();
 	void init_mesh_pipeline();
 	void init_default_mesh_data();
+	void init_default_data();
 
 	// Resizing Function
 	void resize_swapchain();

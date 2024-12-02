@@ -53,7 +53,7 @@ struct Vertex {
     glm::vec4 colour;
 };
 
-// Contains Mesh Data
+// GPU Mesh Data
 struct GPUMeshBuffers {
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
@@ -64,4 +64,38 @@ struct GPUMeshBuffers {
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
+};
+
+// Mesh Object
+struct RenderObject {
+    uint32_t indexCount;
+    uint32_t firstIndex;
+    VkBuffer indexBuffer;
+
+    MaterialInstance* material;
+
+    glm::mat4 transform;
+    VkDeviceAddress vertexBufferAddress;
+};
+
+enum class MaterialPass :uint8_t {
+    MainColour,
+    Transparent,
+    Other
+};
+
+struct MaterialPipeline {
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+};
+
+struct MaterialInstance {
+    MaterialPipeline* pipeline;
+    VkDescriptorSet materialSet;
+    MaterialPass passType;
+};
+
+// Interfaces
+class IRenderable {
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
 };
