@@ -3,6 +3,7 @@
 #pragma once
 #include <vk_types.h>
 #include <vk_descriptors.h>
+#include <camera.h>
 #include <unordered_map>
 #include <filesystem>
 
@@ -59,7 +60,6 @@ struct ComputeEffect {
 	ComputePushConstants data;
 };
 
-
 // Scene Data
 struct GPUSceneData {
 	glm::mat4 view;
@@ -70,7 +70,7 @@ struct GPUSceneData {
 	glm::vec4 sunlightColour;
 };
 
-// GLTF Loading Structs
+// Material Setup - GLTF Loading Structs
 struct GLTFMetallic_Roughness {
 	MaterialPipeline opaquePipeline;
 	MaterialPipeline transparentPipeline;
@@ -103,7 +103,6 @@ struct GLTFMetallic_Roughness {
 	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
 };
 
-
 // Classes -------------------------------------------------------------------------------
 
 class VulkanEngine {
@@ -118,6 +117,13 @@ public:
 	struct SDL_Window* _window{ nullptr };
 	static VulkanEngine& Get();
 	bool resize_requested{ false };
+	
+	// World Camera
+	Camera mainCamera;
+
+	// Draw Context & Mesh Node Structures
+	DrawContext mainDrawContext;
+	std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
 
 	// Initial Structures
 	VkInstance _instance;
@@ -197,7 +203,7 @@ public:
 
 	// Test Material
 	MaterialInstance defaultData;
-	GLTFMetallic_Roughness metalRoughtMaterial;
+	GLTFMetallic_Roughness metalRoughMaterial;
 	
 	// Initialises Engine
 	void init();
@@ -207,6 +213,9 @@ public:
 	
 	// Main loop
 	void run();
+
+	// Update Scene -> Physics & Draw functions + Camera
+	void update_scene();
 	
 	// Immediate Submit Functions Setup
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
@@ -256,3 +265,4 @@ private:
 	// Resizing Function
 	void resize_swapchain();
 };
+

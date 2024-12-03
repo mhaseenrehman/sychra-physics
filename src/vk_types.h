@@ -30,6 +30,8 @@
         }                                                               \
     } while (0)
 
+class VulkanEngine;
+
 struct AllocatedImage {
     VkImage image;
     VkImageView imageView;
@@ -60,35 +62,6 @@ struct GPUMeshBuffers {
     VkDeviceAddress vertexBufferAddress;
 };
 
-// Bounds Struct
-struct Bounds {
-    glm::vec3 origin;
-    float sphereRadius;
-    glm::vec3 extents;
-};
-
-// GLTF Material Struct
-struct GLTFMaterial {
-    MaterialInstance data;
-};
-
-// GLTF Mesh Structs
-struct GeoSurface {
-    uint32_t startIndex;
-    uint32_t count;
-
-    Bounds bounds;
-    std::shared_ptr<GLTFMaterial> material;
-};
-
-// Mesh Asset Struct
-struct MeshAsset {
-    std::string name;
-    std::vector<GeoSurface> surfaces;
-    GPUMeshBuffers meshBuffers;
-};
-
-
 // Containts Push Constants for Mesh Data
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
@@ -97,8 +70,39 @@ struct GPUDrawPushConstants {
 
 // Dynamic mesh Rendering Structures --------------------------------------------------------------
 
+enum class MaterialPass :uint8_t {
+    MainColour,
+    Transparent,
+    Other
+};
+
+struct MaterialPipeline {
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+};
+
+struct MaterialInstance {
+    MaterialPipeline* pipeline;
+    VkDescriptorSet materialSet;
+    MaterialPass passType;
+};
+
+// Render Object - Main Object for meshes
+struct RenderObject {
+    uint32_t indexCount;
+    uint32_t firstIndex;
+    VkBuffer indexBuffer;
+
+    MaterialInstance* material;
+
+    glm::mat4 transform;
+    VkDeviceAddress vertexBufferAddress;
+};
+
 // Full Draw Context - List of objects
-struct DrawContext;
+struct DrawContext {
+    std::vector<RenderObject> OpaqueSurfaces;
+};
 
 // Interfaces
 class IRenderable {
@@ -133,43 +137,29 @@ struct Node : public IRenderable {
     }
 };
 
+// GLTF Material Struct
+struct GLTFMaterial {
+    MaterialInstance data;
+};
+
+// GLTF Mesh Structs
+struct GeoSurface {
+    uint32_t startIndex;
+    uint32_t count;
+
+    std::shared_ptr<GLTFMaterial> material;
+};
+
+// Mesh Asset Struct
+struct MeshAsset {
+    std::string name;
+    std::vector<GeoSurface> surfaces;
+    GPUMeshBuffers meshBuffers;
+};
 
 // Mesh Node Object
 struct MeshNode : public Node {
     std::shared_ptr<MeshAsset> mesh;
 
     virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
-};
-
-// Render Object
-struct RenderObject {
-    uint32_t indexCount;
-    uint32_t firstIndex;
-    VkBuffer indexBuffer;
-
-    MaterialInstance* material;
-
-    glm::mat4 transform;
-    VkDeviceAddress vertexBufferAddress;
-};
-
-struct DrawContext {
-    std::vector<RenderObject> OpaqueSurfaces;
-};
-
-enum class MaterialPass :uint8_t {
-    MainColour,
-    Transparent,
-    Other
-};
-
-struct MaterialPipeline {
-    VkPipeline pipeline;
-    VkPipelineLayout layout;
-};
-
-struct MaterialInstance {
-    MaterialPipeline* pipeline;
-    VkDescriptorSet materialSet;
-    MaterialPass passType;
 };
