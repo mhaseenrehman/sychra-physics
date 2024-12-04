@@ -11,7 +11,6 @@
 #include <vk_images.h>
 #include <vk_mem_alloc.h>
 #include <vk_pipelines.h>
-#include <vk_loader.h> 
 #include "VkBootstrap.h"
 
 #include "imgui.h"
@@ -65,9 +64,17 @@ void VulkanEngine::init()
 
     // Initialise camera coordinates
     mainCamera.velocity = glm::vec3(0.f);
-    mainCamera.position = glm::vec3(0, 0, 5);
+    // mainCamera.position = glm::vec3(0, 0, 5);
+    mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
     mainCamera.pitch = 0;
     mainCamera.yaw = 0;
+
+    std::string structurePath = { "..\\assets\\structure.glb" };
+    auto structureFile = loadGltf(this, structurePath);
+
+    assert(structureFile.has_value());
+
+    loadedScenes["structure"] = *structureFile;
 
     // everything went fine
     _isInitialized = true;
@@ -734,6 +741,13 @@ void VulkanEngine::draw_background(VkCommandBuffer cmd) {
 }
 
 void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
+    // Reset counters
+    stats.drawcall_count = 0;
+    stats.triangle_count = 0;
+
+    // Begin Clock
+    auto start = std::chrono::system_clock::now();
+
     VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
     VkRenderingInfo renderInfo = vkinit::rendering_info(_windowExtent, &colorAttachment, &depthAttachment);
@@ -777,7 +791,8 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
     writer.update_set(_device, globalDescriptor);
 
     // Draw Entire Object List
-    for (const RenderObject& draw : mainDrawContext.OpaqueSurfaces) {
+    /*for (const RenderObject& draw : mainDrawContext.OpaqueSurfaces) {}*/
+    auto draw = [&](const RenderObject& draw) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->layout, 1, 1, &draw.material->materialSet, 0, nullptr);
@@ -790,9 +805,31 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
         vkCmdPushConstants(cmd, draw.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
 
         vkCmdDrawIndexed(cmd, draw.indexCount, 1, draw.firstIndex, 0, 0);
+
+        // Add counters for triangles and draws
+        stats.drawcall_count++;
+        stats.triangle_count += draw.indexCount / 3;
+    };
+
+    for (auto& o : mainDrawContext.OpaqueSurfaces) {
+        draw(o);
+    }
+
+    for (auto& t : mainDrawContext.TransparentSurfaces) {
+        draw(t);
     }
     
     vkCmdEndRendering(cmd);
+
+    // delete draw commands now that we processed them
+    mainDrawContext.OpaqueSurfaces.clear();
+    mainDrawContext.TransparentSurfaces.clear();
+
+    auto end = std::chrono::system_clock::now();
+
+    // Convert to microseconds (int) and then come back to milliseconds
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    stats.mesh_draw_time = elapsed.count() / 1000.f;
 }
 
 void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView) {
@@ -984,6 +1021,9 @@ void VulkanEngine::run()
 
     // main loop
     while (!bQuit) {
+        // begin clock
+        auto start = std::chrono::system_clock::now();
+        
         // Handle events on queue
         while (SDL_PollEvent(&e) != 0) {
             // close the window when user alt-f4s or clicks the X button
@@ -1041,17 +1081,35 @@ void VulkanEngine::run()
             ImGui::InputFloat4("data3", (float*)&selected.data.data3);
             ImGui::InputFloat4("data4", (float*)&selected.data.data4);
         }
+        
+        ImGui::End();
 
+        ImGui::Begin("Stats");
+        ImGui::Text("frametime %f ms", stats.frametime);
+        ImGui::Text("draw time %f ms", stats.mesh_draw_time);
+        ImGui::Text("update time %f ms", stats.scene_update_time);
+        ImGui::Text("triangles %i", stats.triangle_count);
+        ImGui::Text("draws %i", stats.drawcall_count);
         ImGui::End();
 
         // ImGUI Calculates Internal Draw Structures
         ImGui::Render();
 
         draw();
+
+        // get clock again
+        auto end = std::chrono::system_clock::now();
+
+        // convert to microseconds (int) and then come back to milliseconds
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        stats.frametime = elapsed.count() / 1000.f;
     }
 }
 
 void VulkanEngine::update_scene() {
+    // Start Clock
+    auto start = std::chrono::system_clock::now();
+
     // Camera Update
     mainCamera.update();
     mainDrawContext.OpaqueSurfaces.clear();
@@ -1083,12 +1141,22 @@ void VulkanEngine::update_scene() {
 
         loadedNodes["Cube"]->Draw(translation * scale, mainDrawContext);
     }
+
+    loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
+
+    // End Clock
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    stats.scene_update_time = elapsed.count() / 1000.f;
 }
 
 void VulkanEngine::cleanup()
 {
     if (_isInitialized) {
         vkDeviceWaitIdle(_device);
+
+        loadedScenes.clear();
+
 
         for (int i = 0; i < FRAME_OVERLAP; i++) {
             vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
@@ -1197,6 +1265,14 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine) {
     // destroy shader modules
     vkDestroyShaderModule(engine->_device, meshFragShader, nullptr);
     vkDestroyShaderModule(engine->_device, meshVertShader, nullptr);
+
+    // add objects to main deletion queue
+    engine->_mainDeletionQueue.push_function([=]() {
+        vkDestroyDescriptorSetLayout(engine->_device, materialLayout, nullptr);
+        vkDestroyPipelineLayout(engine->_device, newLayout, nullptr);
+        vkDestroyPipeline(engine->_device, opaquePipeline.pipeline, nullptr);
+        vkDestroyPipeline(engine->_device, transparentPipeline.pipeline, nullptr);
+    });
 }
 
 MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator) {
@@ -1238,7 +1314,9 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx) {
     Node::Draw(topMatrix, ctx);
 }
 
-
+void clear_resources(VkDevice device) {
+    // Add cleanup code here instead of in build_pipelines
+}
 
 // Unused Code
 

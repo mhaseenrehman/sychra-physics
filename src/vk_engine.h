@@ -3,6 +3,7 @@
 #pragma once
 #include <vk_types.h>
 #include <vk_descriptors.h>
+#include "vk_loader.h"
 #include <camera.h>
 #include <unordered_map>
 #include <filesystem>
@@ -103,6 +104,16 @@ struct GLTFMetallic_Roughness {
 	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
 };
 
+
+// Timing Info Struct
+struct EngineStats {
+	float frametime;
+	int triangle_count;
+	int drawcall_count;
+	float scene_update_time;
+	float mesh_draw_time;
+};
+
 // Classes -------------------------------------------------------------------------------
 
 class VulkanEngine {
@@ -110,20 +121,22 @@ public:
 
 	// Base Structures
 	bool _isInitialized{ false };
-	bool bUseValidationLayers{ true };
+	bool bUseValidationLayers{ false };
 	int _frameNumber {0};
 	bool stop_rendering{ false };
 	VkExtent2D _windowExtent{ 1700 , 900 };
 	struct SDL_Window* _window{ nullptr };
 	static VulkanEngine& Get();
 	bool resize_requested{ false };
+	EngineStats stats;
 	
 	// World Camera
 	Camera mainCamera;
 
-	// Draw Context & Mesh Node Structures
+	// Draw Context, Mesh Nodes & Scene
 	DrawContext mainDrawContext;
 	std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
+	std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> loadedScenes;
 
 	// Initial Structures
 	VkInstance _instance;
@@ -228,6 +241,10 @@ public:
 	GPUMeshBuffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void destroy_buffer(const AllocatedBuffer& buffer);
 
+	// Image Functions Setup
+	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	void destroy_image(const AllocatedImage& img);
 	
 
 private:
@@ -251,13 +268,8 @@ private:
 	void draw_geometry(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
-	// Image Functions Setup
-	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-	void destroy_image(const AllocatedImage& img);
-
 	// Triangle Shader & Mesh Shader
-	void init_triangle_pipeline();
+	//void init_triangle_pipeline();
 	void init_mesh_pipeline();
 	void init_default_mesh_data();
 	void init_default_data();

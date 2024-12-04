@@ -102,6 +102,7 @@ struct RenderObject {
 // Full Draw Context - List of objects
 struct DrawContext {
     std::vector<RenderObject> OpaqueSurfaces;
+    std::vector<RenderObject> TransparentSurfaces;
 };
 
 // Interfaces
