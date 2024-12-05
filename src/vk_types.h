@@ -70,6 +70,13 @@ struct GPUDrawPushConstants {
 
 // Dynamic mesh Rendering Structures --------------------------------------------------------------
 
+// Frustum Culling Struct
+struct Bounds {
+    glm::vec3 origin;
+    float sphereRadius;
+    glm::vec3 extents;
+};
+
 enum class MaterialPass :uint8_t {
     MainColour,
     Transparent,
@@ -94,7 +101,7 @@ struct RenderObject {
     VkBuffer indexBuffer;
 
     MaterialInstance* material;
-
+    Bounds bounds;
     glm::mat4 transform;
     VkDeviceAddress vertexBufferAddress;
 };
@@ -148,6 +155,7 @@ struct GeoSurface {
     uint32_t startIndex;
     uint32_t count;
 
+    Bounds bounds;
     std::shared_ptr<GLTFMaterial> material;
 };
 

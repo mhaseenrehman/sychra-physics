@@ -11,7 +11,6 @@ void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx) {
 		n->Draw(topMatrix, ctx);
 	}
 }
-
 void LoadedGLTF::clearAll() {
 	VkDevice device = creator->_device;
 
@@ -271,6 +270,19 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 				newSurface.material = materials[0];
 			}
 
+			// loop vertices of this surface, find min/max bounds
+			glm::vec3 minpos = vertices[initial_vtx].position;
+			glm::vec3 maxpos = vertices[initial_vtx].position;
+			for (int i = initial_vtx; i < vertices.size(); i++) {
+				minpos = glm::min(minpos, vertices[i].position);
+				maxpos = glm::max(maxpos, vertices[i].position);
+			}
+
+			// calculate origin and extents from min/max, use extent length for radius
+			newSurface.bounds.origin = (maxpos + minpos) / 2.f;
+			newSurface.bounds.extents = (maxpos - minpos) / 2.f;
+			newSurface.bounds.sphereRadius = glm::length(newSurface.bounds.extents);
+
 			newMesh->surfaces.push_back(newSurface);
 		}
 
@@ -478,7 +490,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
 							imageSize.height = height;
 							imageSize.depth = 1;
 							
-							newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+							newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 						
 							stbi_image_free(data);
 						}
@@ -491,7 +503,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
 							imageSize.height = height;
 							imageSize.depth = 1;
 
-							newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+							newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 							stbi_image_free(data);
 						}
@@ -513,7 +525,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
 									imageSize.depth = 1;
 
 									newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM,
-										VK_IMAGE_USAGE_SAMPLED_BIT, false);
+										VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 									stbi_image_free(data);
 								}

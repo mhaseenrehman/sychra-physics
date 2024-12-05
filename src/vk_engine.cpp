@@ -31,6 +31,47 @@ VulkanEngine* loadedEngine = nullptr;
 
 VulkanEngine& VulkanEngine::Get() { return *loadedEngine; }
 
+// Global Functionality -----------------------------------------------------------------------------------
+
+bool is_visible(const RenderObject& obj, const glm::mat4& viewproj) {
+    std::array<glm::vec3, 8> corners{
+        glm::vec3 { 1, 1, 1 },
+        glm::vec3 { 1, 1, -1 },
+        glm::vec3 { 1, -1, 1 },
+        glm::vec3 { 1, -1, -1 },
+        glm::vec3 { -1, 1, 1 },
+        glm::vec3 { -1, 1, -1 },
+        glm::vec3 { -1, -1, 1 },
+        glm::vec3 { -1, -1, -1 },
+    };
+
+    glm::mat4 matrix = viewproj * obj.transform;
+
+    glm::vec3 min = { 1.5, 1.5, 1.5 };
+    glm::vec3 max = { -1.5, -1.5, -1.5 };
+
+    for (int c = 0; c < 8; c++) {
+        // Project each corner into clip space
+        glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (corners[c] * obj.bounds.extents), 1.f);
+
+        // Perspective Correction
+        v.x = v.x / v.w;
+        v.y = v.y / v.w;
+        v.z = v.z / v.w;
+
+        min = glm::min(glm::vec3{ v.x, v.y, v.z }, min);
+        max = glm::max(glm::vec3{ v.x, v.y, v.z }, max);
+    }
+
+    // Check the clip space box is within the view
+    if (min.z > 1.f || max.z < 0.f || min.x > 1.f || max.x < -1.f || min.y > 1.f || max.y < -1.f) {
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
 // Initialisation Functionality ---------------------------------------------------------------------------
 
 void VulkanEngine::init()
@@ -741,6 +782,28 @@ void VulkanEngine::draw_background(VkCommandBuffer cmd) {
 }
 
 void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
+    std::vector<uint32_t> opaque_draws;
+    opaque_draws.reserve(mainDrawContext.OpaqueSurfaces.size());
+
+    for (uint32_t i = 0; i < mainDrawContext.OpaqueSurfaces.size(); i++) {
+        if (is_visible(mainDrawContext.OpaqueSurfaces[i], sceneData.viewproj)) {
+            opaque_draws.push_back(i);
+        }
+    }
+
+    // Sort opaque surfaces by material and mesh
+    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& iA, const auto& iB) {
+        const RenderObject& A = mainDrawContext.OpaqueSurfaces[iA];
+        const RenderObject& B = mainDrawContext.OpaqueSurfaces[iB];
+
+        if (A.material == B.material) {
+            return A.indexBuffer < B.indexBuffer;
+        }
+        else {
+            return A.material < B.material;
+        }
+    });
+
     // Reset counters
     stats.drawcall_count = 0;
     stats.triangle_count = 0;
@@ -752,8 +815,6 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
     VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
     VkRenderingInfo renderInfo = vkinit::rendering_info(_windowExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
-
-    
 
     // Allocate new uniform buffer for scene data
     AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -775,7 +836,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
     writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     writer.update_set(_device, globalDescriptor);
 
-    // Define outside draw function: stateful pripeline
+    // Define outside draw function: stateful pipeline
     MaterialPipeline* lastPipeline = nullptr;
     MaterialInstance* lastMaterial = nullptr;
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
@@ -786,7 +847,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
         if (r.material != lastMaterial) {
             lastMaterial = r.material;
 
-            //rebind pipelines and descriptors if material changed
+            // check if pipeline has changed - rebind pipelines and descriptors if material changed
             if (r.material->pipeline != lastPipeline) {
 
                 lastPipeline = r.material->pipeline;
@@ -811,21 +872,23 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
                 vkCmdSetScissor(cmd, 0, 1, &scissor);
             }
 
+            // bind descriptor sets for material parameters and textures if material isntance changed
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1, &r.material->materialSet, 0, nullptr);
         }
 
-        // rebind index buffer if needed
+        // rebind index buffer if changed
         if (r.indexBuffer != lastIndexBuffer) {
-            
+            lastIndexBuffer = r.indexBuffer;
+            vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         }
+        
+        // calculate final mesh matrix
+        GPUDrawPushConstants push_constants;
+        push_constants.worldMatrix = r.transform;
+        push_constants.vertexBuffer = r.vertexBufferAddress;
 
-        vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-        GPUDrawPushConstants pushConstants;
-        pushConstants.vertexBuffer = r.vertexBufferAddress;
-        pushConstants.worldMatrix = r.transform;
-        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
-
+        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+        
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
 
         // Add counters for triangles and draws
@@ -833,8 +896,8 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
         stats.triangle_count += r.indexCount / 3;
     };
 
-    for (auto& o : mainDrawContext.OpaqueSurfaces) {
-        draw(o);
+    for (auto& o : opaque_draws) {
+        draw(mainDrawContext.OpaqueSurfaces[o]);
     }
 
     for (auto& t : mainDrawContext.TransparentSurfaces) {
@@ -996,16 +1059,21 @@ AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat 
         copyRegion.imageSubresource.layerCount = 1;
         copyRegion.imageExtent = size;
 
-        // copy the buffer into the image
+        // Copy the buffer into the image
         vkCmdCopyBufferToImage(cmd, uploadbuffer.buffer, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
             &copyRegion);
 
-        vkutil::transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        });
+        if (mipmapped) {
+            vkutil::generate_mipmaps(cmd, new_image.image, VkExtent2D{new_image.imageExtent.width, new_image.imageExtent.height});
+            fmt::println("Generated Mip Maps!\n");
+        }
+        else {
+            vkutil::transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+    });
 
     destroy_buffer(uploadbuffer);
-
     return new_image;
 }
 
@@ -1131,6 +1199,9 @@ void VulkanEngine::run()
 void VulkanEngine::update_scene() {
     // Start Clock
     auto start = std::chrono::system_clock::now();
+
+    // Physics Update
+
 
     // Camera Update
     mainCamera.update();
@@ -1327,12 +1398,19 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx) {
         def.firstIndex = s.startIndex;
         def.indexBuffer = mesh->meshBuffers.indexBuffer.buffer;
         def.material = &s.material->data;
+        def.bounds = s.bounds;
         def.transform = nodeMatrix;
         def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
 
-        ctx.OpaqueSurfaces.push_back(def);
+        if (s.material->data.passType == MaterialPass::Transparent) {
+            ctx.TransparentSurfaces.push_back(def);
+        }
+        else {
+            ctx.OpaqueSurfaces.push_back(def);
+        }
     }
 
+    // Recurse down Draw Tree
     Node::Draw(topMatrix, ctx);
 }
 
