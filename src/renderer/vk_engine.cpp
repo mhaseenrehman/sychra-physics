@@ -13,6 +13,8 @@
 #include <vk_pipelines.h>
 #include "VkBootstrap.h"
 
+#include "phy_engine.h"
+
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
@@ -116,6 +118,9 @@ void VulkanEngine::init()
     assert(structureFile.has_value());
 
     loadedScenes["structure"] = *structureFile;
+
+    // Initialise Physics Engine
+    physics::initialise();
 
     // everything went fine
     _isInitialized = true;
