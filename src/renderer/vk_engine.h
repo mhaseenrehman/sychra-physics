@@ -266,7 +266,9 @@ private:
 	// Drawing Functions Setup
 	void draw_background(VkCommandBuffer cmd);
 	void draw_geometry(VkCommandBuffer cmd);
+	void draw_particles(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
+
 
 	// Triangle Shader & Mesh Shader
 	//void init_triangle_pipeline();

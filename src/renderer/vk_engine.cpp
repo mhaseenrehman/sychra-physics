@@ -107,17 +107,17 @@ void VulkanEngine::init()
 
     // Initialise camera coordinates
     mainCamera.velocity = glm::vec3(0.f);
-    // mainCamera.position = glm::vec3(0, 0, 5);
-    mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
+    mainCamera.position = glm::vec3(0, 0, 5);
+    //mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
     mainCamera.pitch = 0;
     mainCamera.yaw = 0;
 
-    std::string structurePath = { "..\\assets\\structure.glb" };
+    std::string structurePath = { "..\\assets\\initial.glb" };
     auto structureFile = loadGltf(this, structurePath);
 
     assert(structureFile.has_value());
 
-    loadedScenes["structure"] = *structureFile;
+    loadedScenes["initial"] = *structureFile;
 
     // Initialise Physics Engine
     physics::initialise();
@@ -496,7 +496,7 @@ void VulkanEngine::init_mesh_pipeline() {
 }
 
 void VulkanEngine::init_default_mesh_data() {
-    testMeshes = loadGltfMeshes(this, "..\\assets\\basicmesh.glb").value();
+    // testMeshes = loadGltfMeshes(this, "..\\assets\\basicmesh.glb").value();
 }
 
 void VulkanEngine::init_default_data() {
@@ -567,7 +567,7 @@ void VulkanEngine::init_default_data() {
     defaultData = metalRoughMaterial.write_material(_device, MaterialPass::MainColour, materialResources, globalDescriptorAllocator);
 
     // Add default material to meshes
-    for (auto& m : testMeshes) {
+    /*for (auto& m : testMeshes) {
         std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
         newNode->mesh = m;
 
@@ -579,7 +579,7 @@ void VulkanEngine::init_default_data() {
         }
 
         loadedNodes[m->name] = std::move(newNode);
-    }
+    }*/
 }
 
 void VulkanEngine::init_imgui() {
@@ -703,7 +703,6 @@ void VulkanEngine::draw()
         resize_requested = true;
         return;
     }
-
 
     VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
@@ -920,6 +919,10 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
     // Convert to microseconds (int) and then come back to milliseconds
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     stats.mesh_draw_time = elapsed.count() / 1000.f;
+}
+
+void VulkanEngine::draw_particles(VkCommandBuffer cmd) {
+
 }
 
 void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView) {
@@ -1212,9 +1215,6 @@ void VulkanEngine::update_scene() {
     mainCamera.update();
     mainDrawContext.OpaqueSurfaces.clear();
 
-    // Draw Monkey Mesh
-    loadedNodes["Suzanne"]->Draw(glm::mat4{1.f}, mainDrawContext);
-
     // Camera view and projection
     glm::mat4 view = mainCamera.getViewMatrix();
     glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)_windowExtent.width / (float)_windowExtent.height, 10000.f, 0.1f);
@@ -1231,16 +1231,21 @@ void VulkanEngine::update_scene() {
     sceneData.ambientColour = glm::vec4(.1f);
     sceneData.sunlightColour = glm::vec4(1.f);
     sceneData.sunlightDirection = glm::vec4(0, 1, 0.5, 1.f);
+    
+    // Draw Baseplate
+    loadedScenes["initial"]->nodes["Ground"]->Draw(glm::mat4{1.f}, mainDrawContext);
+    //loadedScenes["initial"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
+
+    
 
     // Test Mesh cubes draw
-    for (int x = -3; x < 3; x++) {
-        glm::mat4 scale = glm::scale(glm::vec3{0.2});
-        glm::mat4 translation = glm::translate(glm::vec3{x, 1, 0});
+    //for (int x = -3; x < 3; x++) {
+    //    glm::mat4 scale = glm::scale(glm::vec3{0.2});
+    //    glm::mat4 translation = glm::translate(glm::vec3{x, 1, 0});
 
-        loadedNodes["Cube"]->Draw(translation * scale, mainDrawContext);
-    }
-
-    loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
+    //    //loadedScenes["initial"]->nodes["Ground"]->Draw(translation * scale, mainDrawContext);
+    //    loadedScenes["initial"]->nodes["Cube"]->Draw(translation * scale, mainDrawContext);
+    //}
 
     // End Clock
     auto end = std::chrono::system_clock::now();

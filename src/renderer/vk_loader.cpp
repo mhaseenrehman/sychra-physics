@@ -303,7 +303,9 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 		}
 
 		nodes.push_back(newNode);
-		file.nodes[node.name.c_str()];
+		file.nodes[node.name.c_str()] = newNode;
+
+		std::cout << node.name.c_str() << "\n";
 
 		std::visit(
 			fastgltf::visitor{ 
