@@ -1,5 +1,6 @@
 ﻿//> defines
 #define VMA_IMPLEMENTATION
+#define PARTICLE_COUNT 512
 
 //> includes
 #include <SDL.h>
@@ -921,10 +922,6 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd) {
     stats.mesh_draw_time = elapsed.count() / 1000.f;
 }
 
-void VulkanEngine::draw_particles(VkCommandBuffer cmd) {
-
-}
-
 void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView) {
     VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(targetImageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingInfo renderInfo = vkinit::rendering_info(_swapchainExtent, &colorAttachment, nullptr);
@@ -934,6 +931,12 @@ void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView) 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
     vkCmdEndRendering(cmd);
+}
+
+// Particle Functionality ---------------------------------------------------------------------------------
+
+void VulkanEngine::draw_particles(VkCommandBuffer cmd) {
+
 }
 
 // Mesh Functionality -------------------------------------------------------------------------------------
@@ -1428,6 +1431,56 @@ void clear_resources(VkDevice device) {
     // Add cleanup code here instead of in build_pipelines
 }
 
+
+// ========================================================================================================
+//
+//                                            PARTICLE ARCHITECTURE
+// 
+// ========================================================================================================
+
+void ParticleSystem::set_particle(Particle* particle, glm::vec3 emitterPosition) {
+    particle->velocity = glm::vec3{0, 0, 0};
+    particle->acceleration = glm::vec3{ 0, 0, 0 };
+
+    particle->mass = 0.f;
+    particle->damping = 0.95f;
+
+    particle->position = emitterPosition;
+
+}
+
+void ParticleSystem::init_particles() {
+    particleList.resize(PARTICLE_COUNT);
+    for (auto& particle : particleList) {
+        // Set properties of particles
+        set_particle(&particle, glm::vec3{0, 0, 0});
+    }
+
+    // Set particle buffer size to be part of particle list * struct of particle
+    particleResources.size = particleList.size() * sizeof(Particle);
+
+    // Create buffer & map Memory for particle list
+    particleMemory = engine->create_buffer(particleResources.size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+}
+
+void ParticleSystem::set_descriptor_sets() {
+
+}
+
+void ParticleSystem::create_pipelines() {
+
+}
+
+void ParticleSystem::draw_particles(VkCommandBuffer cmd) {
+
+}
+
+void ParticleSystem::clear_particles() {
+
+}
+
+
+/*
 // Unused Code
 
 // draw_geometry code:

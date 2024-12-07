@@ -4,6 +4,7 @@
 #include <vk_types.h>
 #include <vk_descriptors.h>
 #include "vk_loader.h"
+#include "phy_particle.h"
 #include <camera.h>
 #include <unordered_map>
 #include <filesystem>
@@ -104,6 +105,34 @@ struct GLTFMetallic_Roughness {
 	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
 };
 
+// Particle Structures
+struct ParticleSystem{
+	// Pointer to Vulkan Engine
+	VulkanEngine* engine;
+
+	// Particles Resources
+	ParticleResources particleResources;
+
+	// Shader Descriptor Sets
+	VkDescriptorSetLayout particleDescriptorSetLayout;
+	VkDescriptorSet particleDescriptorSet;
+
+	// Particle Pipelines
+	ParticlePipeline particlesPipeline;
+
+	// Set of all Particles
+	std::vector<Particle> particleList;
+
+	// Mapped Memory of particle list
+	AllocatedBuffer particleMemory;
+
+	void init_particles();
+	void set_particle(Particle* particle, glm::vec3 emitterPosition);
+	void set_descriptor_sets();
+	void create_pipelines();
+	void draw_particles(VkCommandBuffer cmd);
+	void clear_particles();
+};
 
 // Timing Info Struct
 struct EngineStats {

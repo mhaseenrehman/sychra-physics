@@ -172,3 +172,24 @@ struct MeshNode : public Node {
 
     virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
+
+// Dynamic Particle System Structs ----------------------------------------------------------------
+
+struct ParticleUniformBuffers {
+    VkBuffer particles;
+};
+
+struct ParticlePipeline {
+    VkPipelineLayout pipelineLayout;
+    VkPipeline pipeline;
+};
+
+struct ParticleResources {
+    VkBuffer buffer{ VK_NULL_HANDLE };
+    VkDeviceMemory memory{ VK_NULL_HANDLE };
+
+    void* mappedMemory;
+    size_t size{ 0 };
+
+    
+};
