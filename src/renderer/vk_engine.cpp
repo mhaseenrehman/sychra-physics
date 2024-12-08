@@ -2,6 +2,7 @@
 #define VMA_IMPLEMENTATION
 #define PARTICLE_COUNT 512
 
+
 //> includes
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -1432,6 +1433,9 @@ void clear_resources(VkDevice device) {
 }
 
 
+
+
+
 // ========================================================================================================
 //
 //                                            PARTICLE ARCHITECTURE
@@ -1439,7 +1443,7 @@ void clear_resources(VkDevice device) {
 // ========================================================================================================
 
 void ParticleSystem::set_particle(Particle* particle, glm::vec3 emitterPosition) {
-    particle->velocity = glm::vec3{0, 0, 0};
+    particle->velocity = glm::vec3{ 0, 0, 0 };
     particle->acceleration = glm::vec3{ 0, 0, 0 };
 
     particle->mass = 0.f;
@@ -1453,7 +1457,7 @@ void ParticleSystem::init_particles() {
     particleList.resize(PARTICLE_COUNT);
     for (auto& particle : particleList) {
         // Set properties of particles
-        set_particle(&particle, glm::vec3{0, 0, 0});
+        set_particle(&particle, glm::vec3{ 0, 0, 0 });
     }
 
     // Set particle buffer size to be part of particle list * struct of particle
@@ -1478,38 +1482,3 @@ void ParticleSystem::draw_particles(VkCommandBuffer cmd) {
 void ParticleSystem::clear_particles() {
 
 }
-
-
-/*
-// Unused Code
-
-// draw_geometry code:
-
-//vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
-
-/*
-// Bind a texture
-    VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
-    {
-        DescriptorWriter writer;
-        writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        writer.update_set(_device, imageSet);
-    }
-
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
-
-    glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
-    // camera projection
-    glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)_drawExtent.width / (float)_drawExtent.height, 1000.f, 0.1f);
-    // Invert Y direction on projection matrix -- similar to opengl
-    projection[1][1] *= -1;
-
-    GPUDrawPushConstants push_constants;
-    push_constants.worldMatrix = projection * view;
-    push_constants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
-
-    vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
-    vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
-
-*/

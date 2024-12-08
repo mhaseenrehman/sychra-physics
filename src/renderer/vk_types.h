@@ -15,6 +15,8 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include <vk_mem_alloc.h>
 
+#include <phy_particle.h>
+
 #include <fmt/core.h>
 
 #include <glm/mat4x4.hpp>
@@ -173,6 +175,8 @@ struct MeshNode : public Node {
     virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
+
+
 // Dynamic Particle System Structs ----------------------------------------------------------------
 
 struct ParticleUniformBuffers {
@@ -190,6 +194,38 @@ struct ParticleResources {
 
     void* mappedMemory;
     size_t size{ 0 };
+};
 
-    
+// Particle Structures
+struct ParticleSystem {
+public:
+    // Pointer to Vulkan Engine
+    VulkanEngine* engine;
+
+    // Particles Resources
+    ParticleResources particleResources;
+
+    // Shader Descriptor Sets
+    VkDescriptorSetLayout particleDescriptorSetLayout;
+    VkDescriptorSet particleDescriptorSet;
+
+    // Particle Pipelines
+    ParticlePipeline particlesPipeline;
+
+    // Set of all Particles
+    std::vector<Particle> particleList;
+
+    // Mapped Memory of particle list
+    AllocatedBuffer particleMemory;
+
+    // Particle Texture
+    AllocatedImage particleTexture;
+    VkSampler particleTextureSampler;
+
+    void init_particles();
+    void set_particle(Particle* particle, glm::vec3 emitterPosition);
+    void set_descriptor_sets();
+    void create_pipelines();
+    void draw_particles(VkCommandBuffer cmd);
+    void clear_particles();
 };

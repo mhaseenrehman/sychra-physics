@@ -1,10 +1,11 @@
 #version 430
 
-in vec2 uv;
-out vec4 final_color;
-uniform sampler2D tex;
+layout (binding = 1) uniform sampler2D particleTexture;
+layout (location = 0) in vec4 inColor;
+
+layout (location = 0) out vec4 outFragColor;
 
 void main()
 {
-    final_color = texture(tex, uv).rgba;
+    outFragColor.rgb = texture(particleTexture, gl_PointCoord).rgb * inColor.rgb;
 }
