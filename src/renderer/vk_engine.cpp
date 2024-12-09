@@ -23,8 +23,11 @@
 
 #include <glm/gtx/transform.hpp>
 
+#include "stb_image.h"
+
 #include <chrono>
 #include <thread>
+
 
 // ========================================================================================================
 //
@@ -35,7 +38,11 @@ VulkanEngine* loadedEngine = nullptr;
 
 VulkanEngine& VulkanEngine::Get() { return *loadedEngine; }
 
-// Global Functionality -----------------------------------------------------------------------------------
+// ========================================================================================================
+//
+//                                              GLOBAL FUNCTIONALITY
+// 
+// ========================================================================================================
 
 bool is_visible(const RenderObject& obj, const glm::mat4& viewproj) {
     std::array<glm::vec3, 8> corners{
@@ -1089,6 +1096,41 @@ AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat 
     return new_image;
 }
 
+AllocatedImage VulkanEngine::createTextureImage(const char* filePath) {
+    int texWidth;
+    int texHeight;
+    int texChannels;
+
+    stbi_uc* pixels = stbi_load(filePath, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+
+    VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+    if (!pixels) {
+        throw std::runtime_error("failed to load texture image!");
+    }
+
+    AllocatedBuffer stagingBuffer = create_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+
+    void* data = stagingBuffer.allocation->GetMappedData();
+    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    stbi_image_free(pixels);
+    
+    VkExtent3D size;
+    size.width = texWidth;
+    size.height = texHeight;
+    size.depth = 1;
+
+    AllocatedImage particleTexture = create_image(
+        data,
+        VkExtent3D{},
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    destroy_buffer(stagingBuffer);
+
+    return particleTexture;
+}
+
 void VulkanEngine::destroy_image(const AllocatedImage& img) {
     vkDestroyImageView(_device, img.imageView, nullptr);
     vmaDestroyImage(_allocator, img.image, img.allocation);
@@ -1433,9 +1475,6 @@ void clear_resources(VkDevice device) {
 }
 
 
-
-
-
 // ========================================================================================================
 //
 //                                            PARTICLE ARCHITECTURE
@@ -1467,8 +1506,51 @@ void ParticleSystem::init_particles() {
     particleMemory = engine->create_buffer(particleResources.size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
-void ParticleSystem::set_descriptor_sets() {
+void ParticleSystem::set_particle_textures() {
+    // Obtain VkImage for Particle Texture
+    particleTexture = engine->createTextureImage("../assets/GreenParticle.png");
 
+    // Create Sampler for VkImage
+    VkSamplerCreateInfo samplerInfo = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(engine->_chosenGPU, &properties);
+    
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_NEVER;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+
+    VK_CHECK(vkCreateSampler(engine->_device, &samplerInfo, nullptr, &particleTextureSampler));
+}
+
+void ParticleSystem::set_descriptor_sets() {
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> poolSizes = {
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}
+    };
+    
+    DescriptorLayoutBuilder builder;
+    builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    particleDescriptorSetLayout = builder.build(engine->_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    
+    particleDescriptorSet = engine->globalDescriptorAllocator.allocate(engine->_device, particleDescriptorSetLayout);
+
+    engine->_mainDeletionQueue.push_function([&]() {
+        vkDestroyDescriptorSetLayout(engine->_device, particleDescriptorSetLayout, nullptr);
+    });
 }
 
 void ParticleSystem::create_pipelines() {
@@ -1476,7 +1558,26 @@ void ParticleSystem::create_pipelines() {
 }
 
 void ParticleSystem::draw_particles(VkCommandBuffer cmd) {
+    // Allocate new uniform buffer for scene data
+    AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+    // Add it to end of deletion queue of this frame
+    get_current_frame()._deletionQueue.push_function([=, this]() {
+        destroy_buffer(gpuSceneDataBuffer);
+        });
+
+    // Write buffer
+    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+    *sceneUniformData = sceneData;
+
+    // Create a descriptor set that binds that buffer and updates it
+    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout);
+
+    // Write GPU scene data
+    DescriptorWriter writer;
+    writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.write_image(1, particleTexture.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    writer.update_set(engine->_device, particleDescriptorSet);
 }
 
 void ParticleSystem::clear_particles() {

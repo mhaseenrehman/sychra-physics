@@ -247,6 +247,7 @@ public:
 	// Image Functions Setup
 	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	AllocatedImage createTextureImage(const char* filePath);
 	void destroy_image(const AllocatedImage& img);
 	
 

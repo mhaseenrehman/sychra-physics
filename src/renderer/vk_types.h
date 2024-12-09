@@ -222,8 +222,12 @@ public:
     AllocatedImage particleTexture;
     VkSampler particleTextureSampler;
 
+    // Scene Data
+    GPUSceneData sceneData;
+
     void init_particles();
     void set_particle(Particle* particle, glm::vec3 emitterPosition);
+    void set_particle_textures();
     void set_descriptor_sets();
     void create_pipelines();
     void draw_particles(VkCommandBuffer cmd);
