@@ -1,6 +1,7 @@
 ﻿#include <vk_pipelines.h>
 #include <fstream>
 #include <vk_initializers.h>
+#include <fmt/core.h>
 
 bool vkutil::load_shader_module(const char* filePath, VkDevice device, VkShaderModule* outShaderModule) {
 
@@ -156,6 +157,37 @@ void PipelineBuilder::disable_depthtest() {
 	_depthStencil.maxDepthBounds = 1.f;
 }
 
+VkVertexInputBindingDescription PipelineBuilder::set_vertex_input_binding(uint32_t binding, uint32_t stride, VkVertexInputRate inputRate) { 
+	VkVertexInputBindingDescription vInputBindDescription{};
+	vInputBindDescription.binding = binding;
+	vInputBindDescription.stride = stride;
+	vInputBindDescription.inputRate = inputRate;
+	return vInputBindDescription;
+}
+
+VkVertexInputAttributeDescription PipelineBuilder::set_vertex_input_attribute_description(uint32_t binding, uint32_t location, VkFormat format, uint32_t offset) {
+	VkVertexInputAttributeDescription vInputAttribDescription{};
+	vInputAttribDescription.binding = binding;
+	vInputAttribDescription.location = location;
+	vInputAttribDescription.format = format;
+	vInputAttribDescription.offset = offset;
+	return vInputAttribDescription;
+}
+
+void PipelineBuilder::set_vertex_input_state(uint32_t bindingsSize, VkVertexInputBindingDescription* pBindings, uint32_t attributesSize, VkVertexInputAttributeDescription* pAttributes) {
+	/*_vertices.vertexBindingDescriptionCount = 1;
+	_vertices.pVertexBindingDescriptions = &vertexInputBinding;
+	_vertices.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
+	_vertices.pVertexAttributeDescriptions = vertexInputAttributes.data();*/
+	_verticesInputState.pVertexBindingDescriptions = pBindings;
+	_verticesInputState.vertexBindingDescriptionCount = bindingsSize;
+
+	_verticesInputState.pVertexAttributeDescriptions = pAttributes;
+	_verticesInputState.vertexAttributeDescriptionCount = attributesSize;
+
+	setVertexInputState = true;
+}
+
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device) {
 	VkPipelineViewportStateCreateInfo viewportState = {};
 	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -171,17 +203,19 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device) {
 	colorBlending.attachmentCount = 1;
 	colorBlending.pAttachments = &_colorBlendAttachment;
 
-	VkPipelineVertexInputStateCreateInfo _vertexInputInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	_verticesInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	VkPipelineVertexInputStateCreateInfo vertexInputState = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 
 	VkGraphicsPipelineCreateInfo pipelineInfo = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 	pipelineInfo.pNext = &_renderInfo;
 	pipelineInfo.stageCount = (uint32_t)_shaderStages.size();
 	pipelineInfo.pStages = _shaderStages.data();
-	pipelineInfo.pVertexInputState = &_vertexInputInfo;
+	pipelineInfo.pVertexInputState = (setVertexInputState) ? &_verticesInputState : &vertexInputState;
 	pipelineInfo.pInputAssemblyState = &_inputAssembly;
-	pipelineInfo.pViewportState = &viewportState;
 	pipelineInfo.pRasterizationState = &_rasterizer;
 	pipelineInfo.pMultisampleState = &_multisampling;
+	pipelineInfo.pViewportState = &viewportState;
 	pipelineInfo.pColorBlendState = &colorBlending;
 	pipelineInfo.pDepthStencilState = &_depthStencil;
 	pipelineInfo.layout = _pipelineLayout;

@@ -1,0 +1,441 @@
+#pragma once
+#include "phy_particle.h"
+#include <fmt/core.h>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/transform.hpp>
+#include <glm/gtx/matrix_cross_product.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
+#include "math.h"
+#include <vector>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/string_cast.hpp>
+
+// ========================================================================================================
+//
+//                                              NAMESPACE PHYSICS
+// 
+// ========================================================================================================
+
+#define PI = 3.14159265358979323846;
+
+namespace Physics {
+// ========================================================================================================
+//
+//                                               PHYSICS STRUCTS
+// 
+// ========================================================================================================
+
+//void setSleepEpsilon(float value);
+//float getSleepEpsilon();
+
+struct RigidBody {
+protected:
+	float inverseMass;
+
+	float linearDamping;
+	float angularDamping;
+
+	glm::vec3 position;
+	glm::vec3 velocity;
+	glm::vec3 acceleration;
+	glm::vec3 lastFrameAcceleration;
+
+	glm::quat orientation;
+	glm::vec3 rotation;
+	glm::mat3 inverseInertiaTensor;
+	glm::mat3 inverseInertiaTensorWorld;
+	
+	glm::mat4 transformMatrix;
+	glm::vec3 forceAccum;
+	glm::vec3 torqueAccum;
+
+	bool isAwake;
+	bool canSleep;
+	float motion;
+
+public:
+	void setMass(const float mass);
+	float getMass() const;
+
+	void setInverseMass(const float inverseMass);
+	float getInverseMass() const;
+	
+	bool hasFiniteMass();
+
+	void setInertiaTensor(const glm::mat3& inertiaTensor);
+	glm::mat3 getInertiaTensor() const;
+	glm::mat3 getInertiaTensorWorld() const;
+
+	void setInverseInertiaTensor(glm::mat3 inverseInertiaTensor);
+	glm::mat3 getInverseInertiaTensor() const;
+	glm::mat3 getInverseInertiaTensorWorld() const;
+
+	void setDamping(const float linearDamping, const float angularDamping);
+	
+	void setLinearDamping(const float linearDamping);
+	float getLinearDamping() const;
+
+	void setAngularDamping(const float angularDamping);
+	float getAngularDamping() const;
+
+	void setPosition(const glm::vec3 position);
+	void setPosition(const float x, const float y, const float z);
+	glm::vec3 getPosition() const;
+
+	void setOrientation(const glm::quat& orientation);
+	void setOrientation(const float r, const float i, const float j, const float k);
+	glm::quat getOrientation() const;
+
+	glm::mat4 getTransform() const;
+
+	glm::vec3 getPointInLocalSpace(const glm::vec3 point) const;
+	glm::vec3 getPointInWorldSpace(const glm::vec3 point) const;
+	glm::vec3 getDirectiontInLocalSpace(const glm::vec3 direction) const;
+	glm::vec3 getDirectiontInWorldSpace(const glm::vec3 direction) const;
+
+	void setVelocity(const glm::vec3 velocity);
+	void setVelocity(const float x, const float y, const float z);
+	glm::vec3 getVelocity() const;
+	void addVelocity(const glm::vec3 deltaVelocity);
+	
+	void setRotation(const glm::vec3 rotation);
+	void setRotation(const float x, const float y, const float z);
+	glm::vec3 getRotation() const;
+	void addRotation(const glm::vec3 deltaRotation);
+
+	void setAcceleration(const glm::vec3 acceleration);
+	void setAcceleration(const float x, const float y, const float z);
+	glm::vec3 getAcceleration() const;
+	glm::vec3 getLastFrameAcceleration() const;
+
+	void addForce(glm::vec3 force);
+	void addForceAtPoint(glm::vec3 force, glm::vec3 point);
+	void addForceAtBodyPoint(glm::vec3 force, glm::vec3 point);
+	void addTorque(glm::vec3 torque);
+
+	glm::quat applyRotation(glm::quat currentRotation, glm::quat multiplier, float scale);
+	
+	void calculateDerivedData();
+	void integrate(float duration);
+	void clearAccumulators();
+	
+	void setAwake(const bool awake=true);
+	bool getAwake() const;
+	void setCanSleep(const bool canSleep=true);
+	bool getCanSleep() const;
+};
+
+// ========================================================================================================
+//
+//												PRIMITIVE STRUCTS
+// 
+// ========================================================================================================
+
+
+struct CollisionPrimitive {
+public: // Attributes
+
+	// Access to data elements for detection
+	friend class IntersectionTests;
+	friend class CollisionDetector;
+	
+	RigidBody* body;
+	glm::mat4 offset;
+
+public: // Methods
+	
+	void calculateInternals();
+	glm::vec3 getAxis(unsigned index) const;
+	const glm::mat4& getTransform() const;
+
+protected:
+	glm::mat4 transform;
+};
+
+struct CollisionSphere : public CollisionPrimitive {
+public:
+	float radius;
+};
+
+struct CollisionPlane : public CollisionPrimitive {
+public:
+	glm::vec3 direction;
+	float offset;
+};
+
+struct CollisionBox : public CollisionPrimitive {
+public:
+	glm::vec3 halfSize;
+};
+
+// ========================================================================================================
+//
+//                                            CONTACT DATA STRUCTS
+// 
+// ========================================================================================================
+
+class Contact
+{
+
+	friend class ContactResolver;
+
+public:
+	RigidBody* body[2];
+
+	glm::vec3 contactPoint;
+	glm::vec3 contactNormal;
+
+	float friction;
+	float restitution;
+	float penetration;
+
+	void setBodyData(RigidBody* one, RigidBody* two, float friction, float restitution);
+
+protected: // Attributes
+	
+	float desiredDeltaVelocity;
+	glm::mat3 contactToWorld;
+	glm::vec3 contactVelocity;
+	glm::vec3 relativeContactPosition[2];
+
+protected: // Methods
+
+	void swapBodies();
+	void matchAwakeState();
+
+	void calculateContactBasis();
+	void calculateInternals(float durationOfFrame);
+	void calculateDesiredDeltaVelocity(float durationOfFrame);
+
+	glm::vec3 calculateLocalVelocity(unsigned bodyIndex, float duration);
+	glm::vec3 calculateFrictionlessImpulse(glm::mat3* inverseInertiaTensor);
+	glm::vec3 calculateFrictionImpulse(glm::mat3* inverseInertiaTensor);
+
+	void applyVelocityChange(glm::vec3 velocityChange[2], glm::vec3 rotationChange[2]);
+	void applyPositionChange(glm::vec3 linearChange[2], glm::vec3 angularChange[2], float penetration);
+};
+
+// ========================================================================================================
+//
+//                                            FINE COLLISION STRUCTS
+// 
+// ========================================================================================================
+
+struct CollisionData {
+	Contact* contactArray;
+	Contact* contacts;
+
+	int contactsLeft;
+	unsigned contactCount;
+
+	float friction;
+	float restitution;
+	float tolerance;
+
+	bool hasMoreContacts();
+	void reset(unsigned maxContacts);
+	void addContacts(unsigned count);
+};
+
+class IntersectionTests {
+public:
+	static bool sphereAndHalfSpace(const CollisionSphere& sphere, const CollisionPlane& plane);
+	static bool sphereAndSphere(const CollisionSphere& one, const CollisionSphere& two);
+	static bool boxAndBox(const CollisionBox& one, const CollisionBox& two);
+	static bool boxAndHalfSpace(const CollisionBox& box, const CollisionPlane& plane);
+};
+
+class CollisionDetector {
+public:
+	static unsigned sphereAndSphere(const CollisionSphere& one, const CollisionSphere& two, CollisionData* data);
+	static unsigned sphereAndHalfSpace(const CollisionSphere& sphere, const CollisionPlane& plane, CollisionData* data);
+	static unsigned sphereAndTruePlane(const CollisionSphere& sphere, const CollisionPlane& plane, CollisionData* data);
+
+	static unsigned boxAndHalfSpace(const CollisionBox& box, const CollisionPlane& plane, CollisionData* data);
+	static unsigned boxAndBox(const CollisionBox& one, const CollisionBox& two, CollisionData* data);
+	static unsigned boxAndPoint(const CollisionBox& box, const glm::vec3& point, CollisionData* data);
+	static unsigned boxAndSphere(const CollisionBox& box, const CollisionSphere& sphere, CollisionData* data);
+};
+
+// ========================================================================================================
+//
+//                                         COLLISION RESOLUTION STRUCTS
+// 
+// ========================================================================================================
+
+class ContactResolver {
+
+public:
+	unsigned velocityIterationsUsed;
+	unsigned positionIterationsUsed;
+
+private:
+	bool validSettings;
+
+protected:
+	unsigned positionIterations;
+	unsigned velocityIterations;
+	
+	float positionEpsilon;
+	float velocityEpsilon;
+	
+public:
+	ContactResolver(unsigned iterations, float velocityEpsilon=(float)0.01, float positionEpsilon=(float)0.01);
+	ContactResolver(unsigned velocityIterations, unsigned positionIterations, float velocityEpsilon=(float)0.01, float positionEpsilon=(float)0.01);
+
+	bool isValid();
+
+	void setIterations(unsigned iterations);
+	void setIterations(unsigned velocityIterations, unsigned positionIterations);
+	void setEpsilon(float velocityEpsilon, float positionEpsilon);
+
+	void resolveContacts(Contact *contactArray, unsigned numContacts, float durationOfFrame);
+
+protected:
+	void prepareContacts(Contact *contactArray, unsigned numContacts, float durationOfFrame);
+	void adjustPositions(Contact *contactArray, unsigned numContacts, float durationOfFrame);
+	void adjustVelocities(Contact *contactArray, unsigned numContacts, float durationOfFrame);
+};
+
+class ContactGenerator {
+public:
+	virtual unsigned addContacts(Contact* contact, unsigned limit) const = 0;
+};
+
+// ========================================================================================================
+//
+//                                              FORCE GENERATORS
+// 
+// ========================================================================================================
+
+class ForceGenerator {
+public:
+	virtual void updateForce(RigidBody* body, float duration) = 0;
+};
+
+class Gravity : ForceGenerator {
+public:
+	glm::vec3 gravity;
+
+	Gravity(const glm::vec3& gravity);
+	virtual void updateForce(RigidBody* body, float duration);
+};
+
+class ForceRegistry {
+protected:
+	struct ForceRegistration {
+		RigidBody* body;
+		ForceGenerator* fg;
+	};
+
+	typedef std::vector<ForceRegistration> Registry;
+	Registry registrations;
+
+public:
+	void add(RigidBody* body, ForceGenerator* fg);
+	//void remove(RigidBody* body, ForceGenerator* fg);
+	void updateForces(float durationOfFrame);
+	//void clear();
+};
+
+// ========================================================================================================
+//
+//												  WORLD STRUCT
+// 
+// ========================================================================================================
+
+class World {
+public:
+
+	bool calculateIterations;
+
+	struct BodyRegistration {
+		RigidBody* body;
+		BodyRegistration* next;
+	};
+
+	BodyRegistration* firstBody;
+	ContactResolver resolver;
+
+	struct ContactGenRegistration {
+		ContactGenerator* gen;
+		ContactGenRegistration* next;
+	};
+
+	ContactGenRegistration* firstContactGen;
+
+	Contact* contacts;
+	unsigned maxContacts;
+
+public:
+	World(unsigned maxContacts, unsigned iterations = 0);
+	~World();
+
+	unsigned generateContacts();
+
+	void runPhysics(float duration);
+	void startFrame();
+};
+
+// ========================================================================================================
+//
+//                                               PHYSICS ENGINE
+// 
+// ========================================================================================================
+//class PhysicsEngine {
+//public:
+//	void initialise();
+//
+//	void add_rigid_body();
+//	void delete_rigid_body();
+//
+//	void update_particle();
+//	void update_physics();
+//
+//private:
+//
+//};
+// ========================================================================================================
+//
+//                                             COARSE COLLISION STRUCTS
+// 
+// ========================================================================================================
+//struct BoundingSphere {
+//	glm::vec3 centre;
+//	float radius;
+//
+//public:
+//	BoundingSphere(const glm::vec3 &centre, float radius);
+//	BoundingSphere(const BoundingSphere &one, const BoundingSphere &two);
+//	bool overlaps(const BoundingSphere* other) const;
+//	float getGrowth(const BoundingSphere& other) const;
+//	float getSize() const;
+//};
+//
+//struct PotentialContact {
+//	RigidBody* body[2];
+//};
+//
+//template<class BoundingVolumeClass>
+//class BVHNode {
+//public:
+//	
+//	BVHNode* parent;
+//	BVHNode* children[2];
+//	RigidBody* body;
+//	BoundingVolumeClass volume;
+//
+//	BVHNode(BVHNode* parent, const BoundingVolumeClass& volume, RigidBody* body=NULL) : parent(parent), volume(volume), body(body);
+//	bool isLeaf() const;
+//	unsigned getPotentialContacts(PotentialContact* contacts, unsigned limit) const;
+//	void insert(RigidBody* body, const BoundingVolumeClass& volume);
+//	~BVHNode();
+//
+//protected:
+//	bool overlaps(const BVHNode<BoundingVolumeClass>* other) const;
+//	unsigned getPotentialContactsWith(const BVHNode<BoundingVolumeClass>* other, PotentialContact* contacts, unsigned limit) const;
+//	void recalculateBoundingVolume(bool recurse = true);
+//};
+
+}

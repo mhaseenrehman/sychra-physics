@@ -14,26 +14,283 @@
 #include <vk_mem_alloc.h>
 #include <vk_pipelines.h>
 #include "VkBootstrap.h"
-
-#include "phy_engine.h"
+#include <glm/gtx/transform.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
 
-#include <glm/gtx/transform.hpp>
+
 
 #include "stb_image.h"
 
+#include <string>
 #include <chrono>
 #include <thread>
+#include <random>
 
+// ========================================================================================================
+//
+//                                          VULKAN RIGID BODY APPLICATION
+// 
+// ========================================================================================================
+
+VulkanPhysicsApplication::VulkanPhysicsApplication() : resolver(maxContacts*8)
+{
+    cData.contactArray = contacts;
+}
+
+RBDemo::RBDemo() : VulkanPhysicsApplication() {
+    createObjects();
+}
+
+//void RBDemo::createObjects() {
+//    // Create boxes
+//    float x = 0.5f;
+//    int y = 3;
+//    float z = 0.5f;
+//    for (Box* box = boxData; box < boxData+boxes; box++) {
+//        box->setState(glm::vec3(x, y+10, z),
+//            glm::quat(0.4, 0.5, 0.6, 0.2),
+//            glm::vec3(1, 1, 1),
+//            glm::vec3(0, 0, 0));
+//
+//        box->calculateInternals();
+//
+//        glm::mat4 transform = box->getTransform();
+//
+//        x += 0.5;
+//        y += 5; 
+//        z += 0.5;
+//    }
+//}
+void RBDemo::createObjects() {
+    // Create boxes
+    float x = 0.5f;
+    int y = 3;
+    float z = 0.5f;
+    for (Box* box = boxData; box < boxData + boxes; box++) {
+        box->setState(
+            Vector3(x, y+10, z),
+            Quaternion(0.1, 0.15, 0.16, 0.12),
+            //Quaternion(0, 0, 0, 0),
+            Vector3(1, 1, 1),
+            Vector3(0, 0, 0)
+        );
+
+        box->calculateInternals();
+
+        x += 0.5;
+        y += 5;
+        z += 0.5;
+    }
+}
+
+void RBDemo::update(float durationOfFrame) {
+    // Find duration of last frame in seconds
+    if (durationOfFrame <= 0.0f or !_isInitialized) {
+        return;
+    }
+    else if (durationOfFrame > 0.05f) {
+        //durationOfFrame = 0.001f; 
+        durationOfFrame = 0.02f;
+    }
+
+    //printf("================== UPDATE ==================\n");
+
+    // Update objects
+    updateObjects(durationOfFrame);
+
+    // Perform contact generation
+    generateContacts();
+
+    // Resolve detected contacts - EDGE-EDGE CONTACTS DO NOT WORK, BOX-BOX DOES NOT WORK
+    resolver.resolveContacts(cData.contactArray, cData.contactCount, durationOfFrame);
+}
+void RBDemo::updateObjects(float durationOfFrame) {
+    // Update physics of each box in turn
+    for (Box* box = boxData; box < boxData + boxes; box++) {
+        // Run physics - Integrate RigidBody = Calculate transform for box
+        box->body->integrate(durationOfFrame);
+
+        // Updates CollisionBox primitive not RigidBody
+        box->calculateInternals();
+        box->isOverlapping = false;
+
+        
+
+        // Debug
+        //printf("POSITION UPDATE AT END OF UPDATE:\n");
+        //printf("\r%s", glm::to_string(box->body->getTransform()[3]).c_str());
+        //printf("\r%s", box->body->getTransform().data[11]);
+        
+
+    }
+
+    // Update physics of each ball in turn
+    // TODO
+}
+//void RBDemo::generateContacts() {
+//    // Create ground plane
+//    // GLM -> Y axis points up
+//    Physics::CollisionPlane ground;
+//    
+//    //ground.direction = glm::vec3(0, 1, 0);
+//    // plane.direction = glm::vec3(0, 0, 1);
+//    ground.direction = Physics::Vector3(0, 1, 0);
+//    ground.offset = 0;
+//
+//    // Makes use of early outs to avoid fine processing
+//    // Set up collision data structure
+//    cData.reset(maxContacts);
+//    cData.friction = (real)0.9;
+//    cData.restitution = (real)0.6;
+//    cData.tolerance = (real)0.1;
+//
+//    // Perform exhaustive collision detection
+//    glm::mat4 transform, otherTransform;
+//    glm::vec3 position, otherPosition;
+//
+//    // Box collision Detection
+//    for (Box* box = boxData; box < boxData + boxes; box++) {
+//        // Check collisions with ground plane
+//        if (!cData.hasMoreContacts()) return;
+//        Physics::CollisionDetector::boxAndHalfSpace(*box, ground, &cData);
+//
+//        // Check collisions with every other box
+//        /*for (Box* other = box + 1; other < boxData + boxes; other++) {
+//            if (!cData.hasMoreContacts()) return;
+//            Physics::CollisionDetector::boxAndBox(*box, *other, &cData);
+//
+//            if (Physics::IntersectionTests::boxAndBox(*box, *other)) {
+//                box->isOverlapping = other->isOverlapping = true;
+//            }
+//        }*/
+//
+//        // Check collisions with every other ball
+//        // TODO
+//    }
+//
+//    // Ball Collision Detection
+//}
+void RBDemo::generateContacts() {
+    // Note that this method makes a lot of use of early returns to avoid
+    // processing lots of potential contacts that it hasn't got room to
+    // store.
+
+    // Create the ground plane data
+    CollisionPlane plane;
+    Vector3 d = Vector3(0, 1, 0);
+    
+    plane.direction = Vector3(0,1,0);
+    plane.offset = 0;
+
+    // Set up the collision data structure
+    cData.reset(maxContacts);
+    cData.friction = (real)0.9;
+    cData.restitution = (real)0.6;
+    cData.tolerance = (real)0.1;
+
+    // Perform exhaustive collision detection
+    Matrix4 transform, otherTransform;
+    Vector3 position, otherPosition;
+    for (Box* box = boxData; box < boxData + boxes; box++)
+    {
+        // Check for collisions with the ground plane
+        if (!cData.hasMoreContacts()) return;
+        CollisionDetector::boxAndHalfSpace(*box, plane, &cData);
+
+        // Check for collisions with each other box
+        /*for (Box* other = box + 1; other < boxData + boxes; other++)
+        {
+            if (!cData.hasMoreContacts()) return;
+            cyclone::CollisionDetector::boxAndBox(*box, *other, &cData);
+
+            if (cyclone::IntersectionTests::boxAndBox(*box, *other))
+            {
+                box->isOverlapping = other->isOverlapping = true;
+            }
+        }*/
+
+        // Check for collisions with each ball
+        /*for (Ball* other = ballData; other < ballData + balls; other++)
+        {
+            if (!cData.hasMoreContacts()) return;
+            cyclone::CollisionDetector::boxAndSphere(*box, *other, &cData);
+        }*/
+    }
+
+    //for (Ball* ball = ballData; ball < ballData + balls; ball++)
+    //{
+    //    // Check for collisions with the ground plane
+    //    if (!cData.hasMoreContacts()) return;
+    //    cyclone::CollisionDetector::sphereAndHalfSpace(*ball, plane, &cData);
+
+    //    for (Ball* other = ball + 1; other < ballData + balls; other++)
+    //    {
+    //        // Check for collisions with the ground plane
+    //        if (!cData.hasMoreContacts()) return;
+    //        cyclone::CollisionDetector::sphereAndSphere(*ball, *other, &cData);
+    //    }
+    //}
+}
+// ========================================================================================================
+//
+//                                              PHYSICS ARCHITECTURE
+// 
+// ========================================================================================================
+
+//Box::Box() : isOverlapping(false) {
+//    body = new Physics::RigidBody();
+//}
+//
+//Box::~Box() {
+//    delete body;
+//}
+//void Box::setState(const glm::vec3& position, const glm::quat& orientation, const glm::vec3& extents, const glm::vec3& velocity) {
+//    
+//    offset = glm::mat4(1);
+//
+//    body->setPosition(position);
+//    body->setRotation(glm::vec3(0, 0, 0));
+//    body->setOrientation(orientation);
+//    body->setVelocity(velocity);
+//    
+//    halfSize = extents;
+//
+//    float mass = halfSize.x * halfSize.y * halfSize.z * 8.0f;
+//    body->setMass(mass);
+//
+//    glm::mat3 tensor = glm::mat3(0.f);
+//    glm::vec3 squares = glm::vec3(
+//        halfSize.x * halfSize.x,
+//        halfSize.y * halfSize.y,
+//        halfSize.z * halfSize.z);
+//    tensor[0][0] = 0.3f * mass * (squares.y + squares.z);
+//    tensor[1][1] = 0.3f * mass * (squares.x + squares.z);
+//    tensor[2][2] = 0.3f * mass * (squares.x + squares.y);
+//
+//    body->setInertiaTensor(tensor);
+//
+//    body->setLinearDamping(0.95f);
+//    body->setAngularDamping(0.8f);
+//    body->clearAccumulators();
+//
+//    // Artificial Gravity
+//    body->setAcceleration(0, -10.0f, 0);
+//
+//    body->setAwake();
+//
+//    body->calculateDerivedData();
+//}
 
 // ========================================================================================================
 //
 //                                                 VULKAN ENGINE
 // 
 // ========================================================================================================
+
 VulkanEngine* loadedEngine = nullptr;
 
 VulkanEngine& VulkanEngine::Get() { return *loadedEngine; }
@@ -107,32 +364,32 @@ void VulkanEngine::init()
     init_vulkan();
     init_swapchain();
     init_commands();
+    //init_compute_commands();
     init_sync_structures();
     init_descriptors();
     init_pipelines();
     init_imgui();
     init_default_mesh_data();
     init_default_data();
+    //init_particle_system();
+    init_physics();
 
     // Initialise camera coordinates
     mainCamera.velocity = glm::vec3(0.f);
-    mainCamera.position = glm::vec3(0, 0, 5);
+    mainCamera.position = glm::vec3(0, 2, 7);
     //mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
     mainCamera.pitch = 0;
     mainCamera.yaw = 0;
 
+    // Scene Data
     std::string structurePath = { "..\\assets\\initial.glb" };
     auto structureFile = loadGltf(this, structurePath);
-
     assert(structureFile.has_value());
-
     loadedScenes["initial"] = *structureFile;
-
-    // Initialise Physics Engine
-    physics::initialise();
 
     // everything went fine
     _isInitialized = true;
+    RigidBodyPhysicsEngine->_isInitialized = true;
 }
 
 void VulkanEngine::init_vulkan() {
@@ -174,8 +431,20 @@ void VulkanEngine::init_vulkan() {
     _device = vkbDevice.device;
     _chosenGPU = physicalDevice.physical_device;
 
+    auto queue_families = physicalDevice.get_queue_families();
+    for (uint32_t i = 0; i < static_cast<uint32_t>(queue_families.size()); i++) {
+        if ((queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && (queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+            // Find the first queue family with graphics operations supported and compute operations supported
+            _graphicsQueueFamily = i;
+            _computeQueueFamily = i;
+        }
+    }
+
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
-    _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+    //_graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+    // Obtain Compute queue
+    vkGetDeviceQueue(_device, _computeQueueFamily, 0, &_computeQueue);
 
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.physicalDevice = _chosenGPU;
@@ -275,15 +544,35 @@ void VulkanEngine::init_commands() {
     });
 }
 
+void VulkanEngine::init_compute_commands() {
+    /*VkCommandPoolCreateInfo commandPoolInfo = {};
+    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.pNext = nullptr;
+    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolInfo.queueFamilyIndex = _computeQueueFamily;
+
+    for (int i = 0; i < FRAME_OVERLAP; i++) {
+        VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_frames[i]._computePool));
+
+        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[i]._computePool, 1);
+
+        VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainComputeBuffer));
+    }*/
+}
+
 void VulkanEngine::init_sync_structures() {
     VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
     VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
         VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i]._renderFence));
-
         VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._swapchainSemaphore));
         VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
+        
+        // Create Particle Compute Sync Objects per frame
+        /*VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i]._computeInFlightFence));
+        VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._computeFinishedSemaphore));
+        */
     }
 
     VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_immFence));
@@ -292,8 +581,11 @@ void VulkanEngine::init_sync_structures() {
     });
 }
 
-void VulkanEngine::init_descriptors() {
-    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 } };
+void VulkanEngine::init_descriptors()
+{
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = { 
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 } 
+    };
  
     globalDescriptorAllocator.init(_device, 10, sizes);
 
@@ -316,20 +608,7 @@ void VulkanEngine::init_descriptors() {
     }
 
     _drawImageDescriptors = globalDescriptorAllocator.allocate(_device, _drawImageDescriptorLayout);
-    /*VkDescriptorImageInfo imgInfo{};
-    imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imgInfo.imageView = _drawImage.imageView;
 
-    VkWriteDescriptorSet drawImageWrite = {};
-    drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    drawImageWrite.pNext = nullptr;
-    drawImageWrite.dstBinding = 0;
-    drawImageWrite.dstSet = _drawImageDescriptors;
-    drawImageWrite.descriptorCount = 1;
-    drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    drawImageWrite.pImageInfo = &imgInfo;
-
-    vkUpdateDescriptorSets(_device, 1, &drawImageWrite, 0, nullptr);*/
     DescriptorWriter writer;
     writer.write_image(0, _drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     writer.update_set(_device, _drawImageDescriptors);
@@ -650,6 +929,10 @@ void VulkanEngine::init_imgui() {
     });
 }
 
+void VulkanEngine::init_physics() {
+    RigidBodyPhysicsEngine = new RBDemo();
+}
+
 // Swapchain Functionality --------------------------------------------------------------------------------
 
 void VulkanEngine::create_swapchain(uint32_t width, uint32_t height) {
@@ -697,10 +980,33 @@ void VulkanEngine::resize_swapchain() {
 // Draw Functionality -------------------------------------------------------------------------------------
 void VulkanEngine::draw()
 {
-    // Update Draw Context
+    // Begin Clock
+    auto start = std::chrono::system_clock::now();
+
     update_scene();
 
-    // Initialise Command Buffer and Sync Structures
+    // Compute Submission ---------------------------------------------------------------------------
+    // NOT USED FOR NOW
+    /*VkCommandBufferBeginInfo cmdBeginInfo_compute = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBuffer comp = get_current_frame()._mainComputeBuffer;
+
+    VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._computeInFlightFence, VK_TRUE, UINT64_MAX));
+    update_scene();
+    VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._computeInFlightFence));
+    VK_CHECK(vkResetCommandBuffer(comp, 0));
+    VK_CHECK(vkBeginCommandBuffer(comp, &cmdBeginInfo_compute));
+    draw_compute_particles(comp);
+    VK_CHECK(vkEndCommandBuffer(comp));
+
+    VkCommandBufferSubmitInfo cmdInfo_compute = vkinit::command_buffer_submit_info(comp);
+    VkSemaphoreSubmitInfo signalInfo_compute = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR, get_current_frame()._computeFinishedSemaphore);
+    VkSubmitInfo2 submit_compute = vkinit::submit_info(&cmdInfo_compute, &signalInfo_compute, nullptr);
+    VK_CHECK(vkQueueSubmit2(_computeQueue, 1, &submit_compute, get_current_frame()._computeInFlightFence));*/
+
+    // Graphics Submission ---------------------------------------------------------------------------
+    VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+
     VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
     get_current_frame()._deletionQueue.flush();
     get_current_frame()._frameDescriptors.clear_pools(_device);
@@ -713,25 +1019,24 @@ void VulkanEngine::draw()
         return;
     }
 
-    VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+    //VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
     // Set Up new Image Extent
-    //_drawExtent.width = _drawImage.imageExtent.width;
-    //_drawExtent.height = _drawImage.imageExtent.height;
     _drawExtent.width = std::min(_swapchainExtent.width, _drawImage.imageExtent.width) * renderScale;
     _drawExtent.height = std::min(_swapchainExtent.height, _drawImage.imageExtent.height) * renderScale;
 
     // BEGIN Command Buffer Recording
-    VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
-
+    
+    //draw_compute_particles(cmd);
     // Transition principle draw image to General, Draw onto it, then transition to SRC and then Transition image to swapchain layout
     vkutil::transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     draw_background(cmd);
     vkutil::transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     vkutil::transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
     draw_geometry(cmd);
+    // draw_graphics_particles(cmd);
     vkutil::transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
@@ -750,13 +1055,18 @@ void VulkanEngine::draw()
 
     // Submit Command Buffer
     VkCommandBufferSubmitInfo cmdInfo = vkinit::command_buffer_submit_info(cmd);
-
     VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
     VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);
-
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdInfo, &signalInfo, &waitInfo);
-
     VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+
+    /*VkCommandBufferSubmitInfo cmdInfo = vkinit::command_buffer_submit_info(cmd);
+    VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
+    VkSemaphoreSubmitInfo waitInfoCompute = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT, get_current_frame()._computeFinishedSemaphore);
+    VkSemaphoreSubmitInfo waitInfos[] = { waitInfoCompute, waitInfo };
+    VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);
+    VkSubmitInfo2 submit = vkinit::submit_info_multiple(&cmdInfo, &signalInfo, waitInfos, 2);
+    VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));*/
 
     // Present Image to Screen
     VkPresentInfoKHR presentInfo = {};
@@ -773,19 +1083,16 @@ void VulkanEngine::draw()
         resize_requested = true;
     }
 
+    auto end = std::chrono::system_clock::now();
+
+    // Convert to microseconds (int) and then come back to milliseconds - Update delta time
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    
     // Increase Frame Number
     _frameNumber++;
 }
 
 void VulkanEngine::draw_background(VkCommandBuffer cmd) {
-    /*VkClearColorValue clearValue;
-    float flash = std::abs(std::sin(_frameNumber / 120.0f));
-    clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
-
-    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-
-    vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);*/
-
     ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
@@ -941,12 +1248,6 @@ void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView) 
     vkCmdEndRendering(cmd);
 }
 
-// Particle Functionality ---------------------------------------------------------------------------------
-
-void VulkanEngine::draw_particles(VkCommandBuffer cmd) {
-
-}
-
 // Mesh Functionality -------------------------------------------------------------------------------------
 
 GPUMeshBuffers VulkanEngine::upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
@@ -1011,6 +1312,23 @@ AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags
 
     AllocatedBuffer newBuffer;
 
+    VK_CHECK(vmaCreateBuffer(_allocator, &bufferInfo, &vmaAllocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
+
+    return newBuffer;
+}
+
+AllocatedBuffer VulkanEngine::create_buffer_detailed(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VkFlags flags) {
+    VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    bufferInfo.pNext = nullptr;
+    bufferInfo.size = allocSize;
+    bufferInfo.usage = usage;
+
+    VmaAllocationCreateInfo vmaAllocInfo = {};
+    vmaAllocInfo.usage = memoryUsage; 
+    vmaAllocInfo.requiredFlags = VkMemoryPropertyFlags(flags);
+
+    AllocatedBuffer newBuffer;
+    
     VK_CHECK(vmaCreateBuffer(_allocator, &bufferInfo, &vmaAllocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
 
     return newBuffer;
@@ -1108,12 +1426,17 @@ AllocatedImage VulkanEngine::createTextureImage(const char* filePath) {
     if (!pixels) {
         throw std::runtime_error("failed to load texture image!");
     }
+    else {
+        fmt::println("GOT THE TEXTURES");
+    }
 
     AllocatedBuffer stagingBuffer = create_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void* data = stagingBuffer.allocation->GetMappedData();
     memcpy(data, pixels, static_cast<size_t>(imageSize));
     stbi_image_free(pixels);
+
+    fmt::println("Got the staging buffer!");
     
     VkExtent3D size;
     size.width = texWidth;
@@ -1122,9 +1445,11 @@ AllocatedImage VulkanEngine::createTextureImage(const char* filePath) {
 
     AllocatedImage particleTexture = create_image(
         data,
-        VkExtent3D{},
+        size,
         VK_FORMAT_R8G8B8A8_UNORM,
         VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    fmt::println("MADE THE IMAGE");
 
     destroy_buffer(stagingBuffer);
 
@@ -1135,6 +1460,10 @@ void VulkanEngine::destroy_image(const AllocatedImage& img) {
     vkDestroyImageView(_device, img.imageView, nullptr);
     vmaDestroyImage(_allocator, img.image, img.allocation);
 }
+
+// Object Creation Functionality --------------------------------------------------------------------------
+
+
 
 // Miscellaneous Functionality ----------------------------------------------------------------------------
 
@@ -1162,6 +1491,7 @@ void VulkanEngine::run()
 {
     SDL_Event e;
     bool bQuit = false;
+    bool pause = false;
 
     // main loop
     while (!bQuit) {
@@ -1184,15 +1514,14 @@ void VulkanEngine::run()
             }
 
             // Keyboard events
-            if (e.type == SDL_KEYDOWN) {
-                fmt::println("Key Pressed!");
-            }
+            /*if (e.type == SDL_KEYDOWN) {
+                pause = !pause;
+            }*/
 
-            if (e.type == SDL_KEYUP) {
-                fmt::println("Key Released!");
+            if (updateCamera) {
+                mainCamera.processSDLEvent(e);
             }
-
-            mainCamera.processSDLEvent(e);
+            
             ImGui_ImplSDL2_ProcessEvent(&e);
         }
 
@@ -1228,6 +1557,13 @@ void VulkanEngine::run()
         
         ImGui::End();
 
+        /*ImGui::Begin("Transform matrix Slider & camera updater");
+        ImGui::SliderFloat("x", &r_x, -10.f, 10.f);
+        ImGui::SliderFloat("y", &r_y, -10.f, 10.f);
+        ImGui::SliderFloat("z", &r_z, -10.f, 10.f);
+        ImGui::Checkbox("camera update", &updateCamera);
+        ImGui::End();*/
+
         ImGui::Begin("Stats");
         ImGui::Text("frametime %f ms", stats.frametime);
         ImGui::Text("draw time %f ms", stats.mesh_draw_time);
@@ -1246,19 +1582,25 @@ void VulkanEngine::run()
 
         // convert to microseconds (int) and then come back to milliseconds
         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        stats.frametime = elapsed.count() / 1000.f;
+        float durationOfFrame = elapsed.count() / 1000.f;
+        stats.frametime = durationOfFrame;
+
+        // Physics Update
+        if (!pause) RigidBodyPhysicsEngine->update(durationOfFrame);
+
     }
 }
 
-void VulkanEngine::update_scene() {
+void VulkanEngine::update_scene()
+{
     // Start Clock
     auto start = std::chrono::system_clock::now();
 
-    // Physics Update
-
-
     // Camera Update
-    mainCamera.update();
+    if (updateCamera) {
+        mainCamera.update();
+    }
+    
     mainDrawContext.OpaqueSurfaces.clear();
 
     // Camera view and projection
@@ -1273,30 +1615,74 @@ void VulkanEngine::update_scene() {
     sceneData.proj = projection;
     sceneData.viewproj = projection * view;
 
-    // Default lighting parameters
+    // Default lighting parameters - Will replace with either Ray tracing or PBR
     sceneData.ambientColour = glm::vec4(.1f);
     sceneData.sunlightColour = glm::vec4(1.f);
     sceneData.sunlightDirection = glm::vec4(0, 1, 0.5, 1.f);
-    
+
     // Draw Baseplate
-    loadedScenes["initial"]->nodes["Ground"]->Draw(glm::mat4{1.f}, mainDrawContext);
-    //loadedScenes["initial"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
+    glm::mat4 scale = glm::scale(glm::vec3{ 1 });
+    glm::mat4 translation = glm::translate(glm::vec3{0, 0, 0});
+    loadedScenes["initial"]->nodes["Ground"]->Draw(translation * scale, mainDrawContext);
 
+    // Update scene based on RigidBodyPhysics simulation - Draw all boxes currently kept in application
+    for (Box* box = RigidBodyPhysicsEngine->boxData; box < RigidBodyPhysicsEngine->boxData+RigidBodyPhysicsEngine->boxes; box++) {
+        //glm::mat4 transform = box->getTransform();
+        Matrix4 transform = box->getTransform();
+
+        glm::mat4 bbb = glm::mat4();
+        bbb[0][0] = transform.data[0];
+        bbb[1][0] = transform.data[1];
+        bbb[2][0] = transform.data[2];
+        bbb[3][0] = transform.data[3];
+
+        bbb[0][1] = transform.data[4];
+        bbb[1][1] = transform.data[5];
+        bbb[2][1] = transform.data[6];
+        bbb[3][1] = transform.data[7];
+
+        bbb[0][2] = transform.data[8];
+        bbb[1][2] = transform.data[9];
+        bbb[2][2] = transform.data[10];
+        bbb[3][2] = transform.data[11];
+
+        bbb[0][3] = 0;
+        bbb[1][3] = 0;
+        bbb[2][3] = 0;
+        bbb[3][3] = 1;
+
+        //glm::transpose(bbb)
+        loadedScenes["initial"]->nodes["Cube"]->Draw(bbb, mainDrawContext);
+        //loadedScenes["initial"]->nodes["Cube"]->Draw(translation*scale, mainDrawContext);
+        
+        printf("%s\n", glm::to_string(glm::transpose(bbb)).c_str());
+
+        
+    }
     
-
+    /*// Draw Baseplate
+    //loadedScenes["initial"]->nodes["Ground"]->Draw(glm::mat4{1.f}, mainDrawContext);
+    //loadedScenes["initial"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
     // Test Mesh cubes draw
     //for (int x = -3; x < 3; x++) {
     //    glm::mat4 scale = glm::scale(glm::vec3{0.2});
     //    glm::mat4 translation = glm::translate(glm::vec3{x, 1, 0});
-
     //    //loadedScenes["initial"]->nodes["Ground"]->Draw(translation * scale, mainDrawContext);
-    //    loadedScenes["initial"]->nodes["Cube"]->Draw(translation * scale, mainDrawContext);
+    //    
     //}
+    glm::mat4 transform = glm::translate(glm::vec3{ 1, 1, 0 });
+    transform = glm::rotate(transform, static_cast<float>(45 * (PI / 180)), glm::vec3(1, 0, 0));
+    // testRigidBody1.transformMatrix = glm::translate(glm::vec3{ r_x, r_y, r_z });
+    glm::mat4 transform1 = glm::translate(glm::vec3{ r_x, r_y, r_z });
+    glm::mat4 transform2 = glm::translate(glm::vec3{ 1, 1, 0 });
+    loadedScenes["initial"]->nodes["Cube"]->Draw(transform1, mainDrawContext);
+    loadedScenes["initial"]->nodes["Cube"]->Draw(transform2, mainDrawContext);*/
 
     // End Clock
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     stats.scene_update_time = elapsed.count() / 1000.f;
+    sceneData.deltaTime = elapsed.count() / 1000.f;
 }
 
 void VulkanEngine::cleanup()
@@ -1470,116 +1856,429 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx) {
     Node::Draw(topMatrix, ctx);
 }
 
-void clear_resources(VkDevice device) {
+void GLTFMetallic_Roughness::clear_resources(VkDevice device) {
     // Add cleanup code here instead of in build_pipelines
 }
 
 
-// ========================================================================================================
+
+// Particle Functionality ---------------------------------------------------------------------------------
+//void VulkanEngine::init_particle_system() {
+//    fmt::println("particle system init started");
+//    init_particle_buffers();
+//    create_particle_pools();
+//    create_particle_descriptor_layout();
+//    create_particle_descriptor_sets();
+//    create_particle_compute_pipeline();
+//    create_particle_graphics_pipeline();
+//    fmt::println("particle system init ended");
+//}
 //
-//                                            PARTICLE ARCHITECTURE
-// 
-// ========================================================================================================
-
-void ParticleSystem::set_particle(Particle* particle, glm::vec3 emitterPosition) {
-    particle->velocity = glm::vec3{ 0, 0, 0 };
-    particle->acceleration = glm::vec3{ 0, 0, 0 };
-
-    particle->mass = 0.f;
-    particle->damping = 0.95f;
-
-    particle->position = emitterPosition;
-
-}
-
-void ParticleSystem::init_particles() {
-    particleList.resize(PARTICLE_COUNT);
-    for (auto& particle : particleList) {
-        // Set properties of particles
-        set_particle(&particle, glm::vec3{ 0, 0, 0 });
-    }
-
-    // Set particle buffer size to be part of particle list * struct of particle
-    particleResources.size = particleList.size() * sizeof(Particle);
-
-    // Create buffer & map Memory for particle list
-    particleMemory = engine->create_buffer(particleResources.size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-}
-
-void ParticleSystem::set_particle_textures() {
-    // Obtain VkImage for Particle Texture
-    particleTexture = engine->createTextureImage("../assets/GreenParticle.png");
-
-    // Create Sampler for VkImage
-    VkSamplerCreateInfo samplerInfo = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(engine->_chosenGPU, &properties);
-    
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_NEVER;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    VK_CHECK(vkCreateSampler(engine->_device, &samplerInfo, nullptr, &particleTextureSampler));
-}
-
-void ParticleSystem::set_descriptor_sets() {
-    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> poolSizes = {
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}
-    };
-    
-    DescriptorLayoutBuilder builder;
-    builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    particleDescriptorSetLayout = builder.build(engine->_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-    
-    particleDescriptorSet = engine->globalDescriptorAllocator.allocate(engine->_device, particleDescriptorSetLayout);
-
-    engine->_mainDeletionQueue.push_function([&]() {
-        vkDestroyDescriptorSetLayout(engine->_device, particleDescriptorSetLayout, nullptr);
-    });
-}
-
-void ParticleSystem::create_pipelines() {
-
-}
-
-void ParticleSystem::draw_particles(VkCommandBuffer cmd) {
-    // Allocate new uniform buffer for scene data
-    AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-    // Add it to end of deletion queue of this frame
-    get_current_frame()._deletionQueue.push_function([=, this]() {
-        destroy_buffer(gpuSceneDataBuffer);
-        });
-
-    // Write buffer
-    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
-    *sceneUniformData = sceneData;
-
-    // Create a descriptor set that binds that buffer and updates it
-    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout);
-
-    // Write GPU scene data
-    DescriptorWriter writer;
-    writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writer.write_image(1, particleTexture.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    writer.update_set(engine->_device, particleDescriptorSet);
-}
-
-void ParticleSystem::clear_particles() {
-
-}
+//void VulkanEngine::init_particle_buffers() {
+//    // Initialize particles
+//    std::default_random_engine rndEngine((unsigned)time(nullptr));
+//    std::uniform_real_distribution<float> rndDist(0.0f, 1.0f);
+//    std::uniform_real_distribution<float> rndDist2(0.1f, 1.0f);
+//    // Initial particle positions on a circle
+//    std::vector<Particle> particles(PARTICLE_COUNT);
+//    for (auto& particle : particles) {
+//        float randPosition_x = rndDist(rndEngine) * 3.0f;
+//        float randPosition_y = rndDist(rndEngine) * 3.0f;
+//        float randPosition_z = rndDist(rndEngine) * 3.0f;
+//        particle.position = glm::vec3(randPosition_x, randPosition_y, randPosition_z);
+//
+//        float randVel_1 = rndDist(rndEngine);
+//        float randVel_2 = rndDist(rndEngine);
+//        float randVel_3 = rndDist(rndEngine);
+//        particle.velocity = glm::normalize(glm::vec3(randVel_1, randVel_2, randVel_3));
+//        //particle.velocity = glm::vec3(randVel_1, randVel_2, randVel_3);
+//
+//        particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+//    }
+//
+//    VkDeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+//
+//    // Staging Buffer Copy to GPU from CPU
+//    AllocatedBuffer staging = create_buffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+//
+//    void* data = staging.allocation->GetMappedData();
+//    memcpy(data, particles.data(), bufferSize);
+//
+//    // Resize Shader buffers to number of frames rendering
+//    particleShaderStorageBuffers.resize(FRAME_OVERLAP);
+//
+//    // Create and Copy buffer - Immediate Submit outside of draw loop
+//    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+//        particleShaderStorageBuffers[i] = create_buffer(bufferSize,
+//            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+//            VMA_MEMORY_USAGE_GPU_ONLY);
+//
+//        // Copy to GPU buffers
+//        immediate_submit([&](VkCommandBuffer cmd) {
+//            VkBufferCopy particleVertexCopy{ 0 };
+//            particleVertexCopy.dstOffset = 0;
+//            particleVertexCopy.srcOffset = 0;
+//            particleVertexCopy.size = bufferSize;
+//
+//            vkCmdCopyBuffer(cmd, staging.buffer, particleShaderStorageBuffers[i].buffer, 1, &particleVertexCopy);
+//        });
+//    }
+//
+//    // Create Uniform Buffers
+//    particleUniformBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+//    
+//    destroy_buffer(staging);
+//}
+//
+//void VulkanEngine::create_particle_pools() {
+//    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> poolSizes = {
+//        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
+//        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4},
+//    };
+//
+//    particleDescriptorAllocator.init(_device, 10, poolSizes);
+//}
+//
+//void VulkanEngine::create_particle_descriptor_layout() {
+//    std::array<VkDescriptorSetLayoutBinding, 3> layoutBindings{};
+//    layoutBindings[0].binding = 0;
+//    layoutBindings[0].descriptorCount = 1;
+//    layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+//    layoutBindings[0].pImmutableSamplers = nullptr;
+//    layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+//
+//    layoutBindings[1].binding = 1;
+//    layoutBindings[1].descriptorCount = 1;
+//    layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+//    layoutBindings[1].pImmutableSamplers = nullptr;
+//    layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+//
+//    layoutBindings[2].binding = 2;
+//    layoutBindings[2].descriptorCount = 1;
+//    layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+//    layoutBindings[2].pImmutableSamplers = nullptr;
+//    layoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+//
+//    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+//    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+//    layoutInfo.bindingCount = 3;
+//    layoutInfo.pBindings = layoutBindings.data();
+//
+//    if (vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &particleComputeDescriptorSetLayout) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create compute descriptor set layout!");
+//    }
+//
+//    std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings_vert{};
+//    layoutBindings_vert[0].binding = 0;
+//    layoutBindings_vert[0].descriptorCount = 1;
+//    layoutBindings_vert[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+//    layoutBindings_vert[0].pImmutableSamplers = nullptr;
+//    layoutBindings_vert[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+//
+//    VkDescriptorSetLayoutCreateInfo layoutInfo2{};
+//    layoutInfo2.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+//    layoutInfo2.bindingCount = 1;
+//    layoutInfo2.pBindings = layoutBindings_vert.data();
+//
+//    if (vkCreateDescriptorSetLayout(_device, &layoutInfo2, nullptr, &particleVertexComputeDescriptorSetLayout) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create compute descriptor set layout!");
+//    }
+//}
+//
+//void VulkanEngine::create_particle_descriptor_sets() {
+//    std::vector<VkDescriptorSetLayout> layouts(FRAME_OVERLAP, particleComputeDescriptorSetLayout);
+//    particleComputeDescriptorSets.resize(FRAME_OVERLAP);
+//
+//    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+//        particleComputeDescriptorSets[i] = particleDescriptorAllocator.allocate(_device, layouts[i]);
+//    }
+//
+//    for (size_t i = 0; i < FRAME_OVERLAP; i++) {
+//        VkDescriptorBufferInfo uniformBufferInfo{};
+//        uniformBufferInfo.buffer = particleUniformBuffer.buffer;
+//        uniformBufferInfo.offset = 0;
+//        uniformBufferInfo.range = sizeof(GPUSceneData);
+//
+//        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+//        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+//        descriptorWrites[0].dstSet = particleComputeDescriptorSets[i];
+//        descriptorWrites[0].dstBinding = 0;
+//        descriptorWrites[0].dstArrayElement = 0;
+//        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+//        descriptorWrites[0].descriptorCount = 1;
+//        descriptorWrites[0].pBufferInfo = &uniformBufferInfo;
+//
+//        VkDescriptorBufferInfo storageBufferInfoLastFrame{};
+//        storageBufferInfoLastFrame.buffer = particleShaderStorageBuffers[(i - 1) % FRAME_OVERLAP].buffer;
+//        storageBufferInfoLastFrame.offset = 0;
+//        storageBufferInfoLastFrame.range = sizeof(Particle) * PARTICLE_COUNT;
+//
+//        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+//        descriptorWrites[1].dstSet = particleComputeDescriptorSets[i];
+//        descriptorWrites[1].dstBinding = 1;
+//        descriptorWrites[1].dstArrayElement = 0;
+//        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+//        descriptorWrites[1].descriptorCount = 1;
+//        descriptorWrites[1].pBufferInfo = &storageBufferInfoLastFrame;
+//
+//        VkDescriptorBufferInfo storageBufferInfoCurrentFrame{};
+//        storageBufferInfoCurrentFrame.buffer = particleShaderStorageBuffers[i].buffer;
+//        storageBufferInfoCurrentFrame.offset = 0;
+//        storageBufferInfoCurrentFrame.range = sizeof(Particle) * PARTICLE_COUNT;
+//
+//        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+//        descriptorWrites[2].dstSet = particleComputeDescriptorSets[i];
+//        descriptorWrites[2].dstBinding = 2;
+//        descriptorWrites[2].dstArrayElement = 0;
+//        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+//        descriptorWrites[2].descriptorCount = 1;
+//        descriptorWrites[2].pBufferInfo = &storageBufferInfoCurrentFrame;
+//
+//        vkUpdateDescriptorSets(_device, 3, descriptorWrites.data(), 0, nullptr);
+//    }
+//}
+//
+//void VulkanEngine::create_particle_compute_pipeline() {
+//    VkShaderModule computeShaderModule;
+//    if (!vkutil::load_shader_module("../shaders/particle/p_comp.spv", _device, &computeShaderModule)) {
+//        fmt::println("Error when building the particle compute shader module!");
+//    }
+//
+//    VkPipelineShaderStageCreateInfo computeShaderStageInfo{};
+//    computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//    computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+//    computeShaderStageInfo.module = computeShaderModule;
+//    computeShaderStageInfo.pName = "main";
+//
+//    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+//    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+//    pipelineLayoutInfo.setLayoutCount = 1;
+//    pipelineLayoutInfo.pSetLayouts = &particleComputeDescriptorSetLayout;
+//
+//    if (vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &particleComputePipelineLayout) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create compute pipeline layout!");
+//    }
+//
+//    
+//    VkComputePipelineCreateInfo pipelineInfo{};
+//    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+//    pipelineInfo.layout = particleComputePipelineLayout;
+//    pipelineInfo.stage = computeShaderStageInfo;
+//
+//    if (vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &particleComputePipeline) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create compute pipeline!");
+//    }
+//
+//    vkDestroyShaderModule(_device, computeShaderModule, nullptr);
+//}
+//
+//void VulkanEngine::create_particle_graphics_pipeline() {
+//    VkShaderModule vertShaderModule;
+//    if (!vkutil::load_shader_module("../shaders/particle/p_vert.spv", _device, &vertShaderModule)) {
+//        fmt::println("Error when building the particle compute shader module!");
+//    }
+//    VkShaderModule fragShaderModule;
+//    if (!vkutil::load_shader_module("../shaders/particle/p_frag.spv", _device, &fragShaderModule)) {
+//        fmt::println("Error when building the particle compute shader module!");
+//    }
+//
+//    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+//    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+//    vertShaderStageInfo.module = vertShaderModule;
+//    vertShaderStageInfo.pName = "main";
+//
+//    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+//    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+//    fragShaderStageInfo.module = fragShaderModule;
+//    fragShaderStageInfo.pName = "main";
+//
+//    VkPipelineShaderStageCreateInfo shaderStages[] = {
+//        vertShaderStageInfo,
+//        fragShaderStageInfo
+//    };
+//
+//    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+//    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+//
+//    VkVertexInputBindingDescription bindingDescription{};
+//    bindingDescription.binding = 0;
+//    bindingDescription.stride = sizeof(Particle);
+//    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+//
+//    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+//    attributeDescriptions[0].binding = 0;
+//    attributeDescriptions[0].location = 0;
+//    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+//    attributeDescriptions[0].offset = offsetof(Particle, position);
+//
+//    attributeDescriptions[1].binding = 0;
+//    attributeDescriptions[1].location = 1;
+//    attributeDescriptions[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+//    attributeDescriptions[1].offset = offsetof(Particle, color);
+//
+//    vertexInputInfo.vertexBindingDescriptionCount = 1;
+//    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+//    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+//    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+//
+//    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+//    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+//    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+//
+//    VkPipelineRasterizationStateCreateInfo rasterization = {};
+//    rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+//    rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+//    rasterization.cullMode = VK_CULL_MODE_NONE;
+//    rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+//    rasterization.lineWidth = 1.0f;
+//
+//    VkPipelineMultisampleStateCreateInfo multisampling{};
+//    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+//    multisampling.sampleShadingEnable = VK_FALSE;
+//    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+//    multisampling.pSampleMask = nullptr;
+//
+//    VkPipelineColorBlendAttachmentState blendAttachmentState[1] = {};
+//    blendAttachmentState[0].colorWriteMask = 0xf;
+//    blendAttachmentState[0].blendEnable = VK_FALSE;
+//    
+//    VkPipelineColorBlendStateCreateInfo colorBlending{};
+//    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+//    colorBlending.attachmentCount = 1;
+//    colorBlending.pAttachments = blendAttachmentState;
+//
+//    VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
+//    depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+//    depthStencilState.depthTestEnable = VK_TRUE;
+//    depthStencilState.depthWriteEnable = VK_TRUE;
+//    depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+//    depthStencilState.depthBoundsTestEnable = VK_FALSE;
+//    depthStencilState.back.failOp = VK_STENCIL_OP_KEEP;
+//    depthStencilState.back.passOp = VK_STENCIL_OP_KEEP;
+//    depthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
+//    depthStencilState.stencilTestEnable = VK_FALSE;
+//    depthStencilState.front = depthStencilState.back;
+//
+//    VkPipelineRenderingCreateInfo _renderInfo{};
+//    _renderInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+//    _renderInfo.depthAttachmentFormat = _depthImage.imageFormat;
+//    VkFormat colorAttachmentFormat = _drawImage.imageFormat;
+//    _renderInfo.colorAttachmentCount = 1;
+//    _renderInfo.pColorAttachmentFormats = &colorAttachmentFormat;
+//
+//    std::vector<VkDynamicState> dynamicStates = {
+//        VK_DYNAMIC_STATE_VIEWPORT,
+//        VK_DYNAMIC_STATE_SCISSOR
+//    };
+//
+//    VkPipelineDynamicStateCreateInfo dynamicState{};
+//    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+//    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+//    dynamicState.pDynamicStates = dynamicStates.data();
+//
+//    VkPipelineViewportStateCreateInfo viewportState{};
+//    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+//    viewportState.viewportCount = 1;
+//    viewportState.scissorCount = 1;
+//
+//    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+//    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+//    pipelineLayoutInfo.setLayoutCount = 1;
+//    pipelineLayoutInfo.pSetLayouts = &particleVertexComputeDescriptorSetLayout;
+//
+//    if (vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &particleGraphicsPipelineLayout) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create pipeline layout!");
+//    }
+//
+//    VkGraphicsPipelineCreateInfo pipelineInfo{ .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+//    pipelineInfo.pNext = &_renderInfo;
+//    pipelineInfo.stageCount = 2;
+//    pipelineInfo.pStages = shaderStages;
+//    pipelineInfo.pVertexInputState = &vertexInputInfo;
+//    pipelineInfo.pInputAssemblyState = &inputAssembly;
+//    pipelineInfo.pRasterizationState = &rasterization;
+//    pipelineInfo.pMultisampleState = &multisampling;
+//    pipelineInfo.pViewportState = &viewportState;
+//    pipelineInfo.pColorBlendState = &colorBlending;
+//    pipelineInfo.pDepthStencilState = &depthStencilState;
+//    pipelineInfo.pDynamicState = &dynamicState;
+//    pipelineInfo.layout = particleGraphicsPipelineLayout;
+//
+//    if (vkCreateGraphicsPipelines(_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &particleGraphicsPipeline) != VK_SUCCESS) {
+//        throw std::runtime_error("failed to create graphics pipeline!");
+//    }
+//
+//    vkDestroyShaderModule(_device, fragShaderModule, nullptr);
+//    vkDestroyShaderModule(_device, vertShaderModule, nullptr);
+//}
+//
+//void VulkanEngine::draw_compute_particles(VkCommandBuffer cmd) {
+//    // Get current frame
+//    size_t currentFrame = _frameNumber % FRAME_OVERLAP;
+//
+//    size_t sceneSize = sizeof(sceneData);
+//    memcpy(particleUniformBuffer.allocation->GetMappedData(), &sceneData, sceneSize);
+//
+//    // Binding
+//    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particleComputePipeline);
+//    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, particleComputePipelineLayout, 0, 1, &particleComputeDescriptorSets[currentFrame], 0, nullptr);
+//    vkCmdDispatch(cmd, PARTICLE_COUNT, 1, 1);
+//}
+//
+//void VulkanEngine::draw_graphics_particles(VkCommandBuffer cmd) {
+//    size_t currentFrame = _frameNumber % FRAME_OVERLAP;
+//
+//    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+//    VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+//    VkRenderingInfo renderInfo = vkinit::rendering_info(_windowExtent, &colorAttachment, &depthAttachment);
+//    vkCmdBeginRendering(cmd, &renderInfo);
+//
+//    // Allocate new uniform buffer for scene data
+//    AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+//
+//    // Add it to end of deletion queue of this frame
+//    get_current_frame()._deletionQueue.push_function([=, this]() {
+//        destroy_buffer(gpuSceneDataBuffer);
+//    });
+//
+//    // Write buffer
+//    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+//    *sceneUniformData = sceneData;
+//
+//    // Create a descriptor set that binds that buffer and updates it
+//    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, particleVertexComputeDescriptorSetLayout);
+//
+//    // Write GPU scene data
+//    DescriptorWriter writer;
+//    writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+//    writer.update_set(_device, globalDescriptor);
+//    
+//    VkViewport viewport = {};
+//    viewport.x = 0;
+//    viewport.y = 0;
+//    viewport.width = _drawExtent.width;
+//    viewport.height = _drawExtent.height;
+//    viewport.minDepth = 0.f;
+//    viewport.maxDepth = 1.f;
+//    vkCmdSetViewport(cmd, 0, 1, &viewport);
+//
+//    VkRect2D scissor = {};
+//    scissor.offset.x = 0;
+//    scissor.offset.y = 0;
+//    scissor.extent.width = _drawExtent.width;
+//    scissor.extent.height = _drawExtent.height;
+//    vkCmdSetScissor(cmd, 0, 1, &scissor);
+//
+//    VkDeviceSize offsets[1] = { 0 };
+//    vkCmdBindVertexBuffers(cmd, 0, 1, &particleShaderStorageBuffers[currentFrame].buffer, offsets);
+//    
+//    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, particleGraphicsPipeline);
+//   
+//    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, particleGraphicsPipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);
+//    
+//    vkCmdDraw(cmd, PARTICLE_COUNT, 1, 0, 0);
+//
+//    vkCmdEndRendering(cmd);
+//}

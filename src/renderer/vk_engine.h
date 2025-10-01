@@ -4,14 +4,15 @@
 #include <vk_types.h>
 #include <vk_descriptors.h>
 #include "vk_loader.h"
-#include "phy_particle.h"
 #include <camera.h>
 #include <unordered_map>
 #include <filesystem>
+#include "phy_engine.h"
 
 // Globals -------------------------------------------------------------------------------
 
 constexpr unsigned int FRAME_OVERLAP = 2;
+constexpr unsigned int NUMBER_OF_OBJECTS = 1;
 
 // Structs -------------------------------------------------------------------------------
 
@@ -34,12 +35,19 @@ struct DeletionQueue {
 
 // Swapchain Frame Struct
 struct FrameData {
+	// Graphics Structures
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
-
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
 
+	// Compute Structures
+	/*VkCommandPool _computePool;
+	VkCommandBuffer _mainComputeBuffer;
+	VkSemaphore _computeFinishedSemaphore;
+	VkFence _computeInFlightFence;*/
+
+	// Descriptor Structures
 	DescriptorAllocatorGrowable _frameDescriptors;
 	DeletionQueue _deletionQueue;
 };
@@ -60,16 +68,6 @@ struct ComputeEffect {
 	VkPipelineLayout layout;
 
 	ComputePushConstants data;
-};
-
-// Scene Data
-struct GPUSceneData {
-	glm::mat4 view;
-	glm::mat4 proj;
-	glm::mat4 viewproj;
-	glm::vec4 ambientColour;
-	glm::vec4 sunlightDirection; // w for sun power
-	glm::vec4 sunlightColour;
 };
 
 // Material Setup - GLTF Loading Structs
@@ -116,12 +114,46 @@ struct EngineStats {
 
 // Classes -------------------------------------------------------------------------------
 
+class VulkanPhysicsApplication {
+protected:
+
+	const static unsigned maxContacts = 256;
+	Contact contacts[maxContacts];
+	CollisionData cData;
+	ContactResolver resolver;
+
+	virtual void generateContacts() = 0;
+	virtual void updateObjects(float durationOfFrame) = 0;
+
+public:
+	
+
+	VulkanPhysicsApplication();
+};
+
+class RBDemo : VulkanPhysicsApplication {
+public:
+	bool _isInitialized = false;
+	const static unsigned boxes = NUMBER_OF_OBJECTS;
+	Box boxData[boxes];
+
+public:
+
+	RBDemo();
+
+	virtual void createObjects();
+	virtual void update(float durationOfFrame);
+	virtual void generateContacts();
+	virtual void updateObjects(float durationOfFrame);
+
+};
+
 class VulkanEngine {
 public:
 
 	// Base Structures
 	bool _isInitialized{ false };
-	bool bUseValidationLayers{ false };
+	bool bUseValidationLayers{ true };
 	int _frameNumber {0};
 	bool stop_rendering{ false };
 	VkExtent2D _windowExtent{ 1700 , 900 };
@@ -129,6 +161,10 @@ public:
 	static VulkanEngine& Get();
 	bool resize_requested{ false };
 	EngineStats stats;
+	bool updateCamera{true};
+
+	// Physics Engine Setup
+	RBDemo* RigidBodyPhysicsEngine;
 	
 	// World Camera
 	Camera mainCamera;
@@ -157,6 +193,9 @@ public:
 	FrameData& get_current_frame() { return _frames[_frameNumber % FRAME_OVERLAP]; }
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
+
+	VkQueue _computeQueue;
+	uint32_t _computeQueueFamily;
 
 	// Memory Allocator
 	VmaAllocator _allocator;
@@ -198,9 +237,6 @@ public:
 	// Depth Testing Setup
 	AllocatedImage _depthImage;
 
-	// Particle System
-	ParticleSystem particleSystem;
-
 	// Default Textures
 	AllocatedImage _whiteImage;
 	AllocatedImage _blackImage;
@@ -241,6 +277,7 @@ public:
 
 	// Mesh Buffer Setup
 	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+	AllocatedBuffer create_buffer_detailed(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VkFlags flags);
 	GPUMeshBuffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void destroy_buffer(const AllocatedBuffer& buffer);
 
@@ -249,7 +286,35 @@ public:
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 	AllocatedImage createTextureImage(const char* filePath);
 	void destroy_image(const AllocatedImage& img);
+
 	
+
+
+	// Particle Properties
+	/*std::vector<AllocatedBuffer> particleShaderStorageBuffers;
+	AllocatedBuffer particleUniformBuffer;
+
+	DescriptorAllocatorGrowable particleDescriptorAllocator;
+
+	VkDescriptorSetLayout particleComputeDescriptorSetLayout;
+	VkDescriptorSetLayout particleVertexComputeDescriptorSetLayout;
+	std::vector<VkDescriptorSet> particleComputeDescriptorSets;
+
+	VkPipelineLayout particleComputePipelineLayout;
+	VkPipeline particleComputePipeline;
+	VkPipelineLayout particleGraphicsPipelineLayout;
+	VkPipeline particleGraphicsPipeline;*/
+
+	// Particle Functions Setup
+	/*void init_particle_buffers();
+	void create_particle_pools();
+	void create_particle_descriptor_layout();
+	void create_particle_descriptor_sets();
+	void create_particle_compute_pipeline();
+	void create_particle_graphics_pipeline();
+	void draw_compute_particles(VkCommandBuffer cmd);
+	void draw_graphics_particles(VkCommandBuffer cmd);*/
+
 
 private:
 
@@ -257,10 +322,12 @@ private:
 	void init_vulkan();
 	void init_swapchain();
 	void init_commands();
+	void init_compute_commands();
 	void init_sync_structures();
 	void init_descriptors();
 	void init_pipelines();
 	void init_background_pipelines();
+	// void init_particle_system();
 	void init_imgui();
 
 	// Swapchain Functions Setup
@@ -270,15 +337,15 @@ private:
 	// Drawing Functions Setup
 	void draw_background(VkCommandBuffer cmd);
 	void draw_geometry(VkCommandBuffer cmd);
-	void draw_particles(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
-
 	// Triangle Shader & Mesh Shader
-	//void init_triangle_pipeline();
 	void init_mesh_pipeline();
 	void init_default_mesh_data();
 	void init_default_data();
+	
+	// Physics Setup
+	void init_physics();
 
 	// Resizing Function
 	void resize_swapchain();

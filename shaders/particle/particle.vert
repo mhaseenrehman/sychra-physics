@@ -25,5 +25,11 @@ void main()
     gl_Position = sceneData.viewproj * vec4(inPosition.xyz, 1.0);
 
 	// Set particle size
-	gl_PointSize = 3;
+	// Base size of the point sprites
+	float spriteSize = 8.0 * 1;
+
+	// Scale particle size depending on camera projection
+	vec4 eyePos = sceneData.view * vec4(inPosition.xyz, 1.0);
+	vec4 projectedCorner = sceneData.projection * vec4(0.5 * spriteSize, 0.5 * spriteSize, eyePos.z, eyePos.w);
+	gl_PointSize = 1700 * projectedCorner.x / projectedCorner.w;	
 }

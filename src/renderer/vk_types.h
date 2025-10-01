@@ -10,18 +10,15 @@
 #include <array>
 #include <functional>
 #include <deque>
-
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
 #include <vk_mem_alloc.h>
-
-#include <phy_particle.h>
-
 #include <fmt/core.h>
-
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
+#define STARTING_OBJECTS = 5;
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
@@ -62,6 +59,26 @@ struct GPUMeshBuffers {
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress;
+};
+
+// Scene Data
+struct GPUSceneData {
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 viewproj;
+    glm::vec4 ambientColour;
+    glm::vec4 sunlightDirection; // w for sun power
+    glm::vec4 sunlightColour;
+    
+    float deltaTime;
+    glm::vec3 pad1;
+};
+
+// Particle Scene Data
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
 
 // Containts Push Constants for Mesh Data
@@ -175,61 +192,30 @@ struct MeshNode : public Node {
     virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
-
-
-// Dynamic Particle System Structs ----------------------------------------------------------------
-
-struct ParticleUniformBuffers {
-    VkBuffer particles;
-};
-
-struct ParticlePipeline {
-    VkPipelineLayout pipelineLayout;
-    VkPipeline pipeline;
-};
-
-struct ParticleResources {
-    VkBuffer buffer{ VK_NULL_HANDLE };
-    VkDeviceMemory memory{ VK_NULL_HANDLE };
-
-    void* mappedMemory;
-    size_t size{ 0 };
-};
-
-// Particle Structures
-struct ParticleSystem {
-public:
-    // Pointer to Vulkan Engine
-    VulkanEngine* engine;
-
-    // Particles Resources
-    ParticleResources particleResources;
-
-    // Shader Descriptor Sets
-    VkDescriptorSetLayout particleDescriptorSetLayout;
-    VkDescriptorSet particleDescriptorSet;
-
-    // Particle Pipelines
-    ParticlePipeline particlesPipeline;
-
-    // Set of all Particles
-    std::vector<Particle> particleList;
-
-    // Mapped Memory of particle list
-    AllocatedBuffer particleMemory;
-
-    // Particle Texture
-    AllocatedImage particleTexture;
-    VkSampler particleTextureSampler;
-
-    // Scene Data
-    GPUSceneData sceneData;
-
-    void init_particles();
-    void set_particle(Particle* particle, glm::vec3 emitterPosition);
-    void set_particle_textures();
-    void set_descriptor_sets();
-    void create_pipelines();
-    void draw_particles(VkCommandBuffer cmd);
-    void clear_particles();
-};
+// Physics Structs
+//struct Box : Physics::CollisionBox {
+//public:
+//
+//    MeshNode node;
+//    bool isOverlapping;
+//
+//public:
+//
+//    Box();
+//    ~Box();
+//    void setState(
+//        const glm::vec3& position, 
+//        const glm::quat& orientation, 
+//        const glm::vec3& extents, 
+//        const glm::vec3& velocity
+//    );
+//};
+//struct Sphere : Physics::CollisionSphere {
+//public:
+//    MeshNode node;
+//};
+//
+//struct Plane : Physics::CollisionPlane {
+//public:
+//    MeshNode node;
+//};

@@ -1,0 +1,1392 @@
+#include "phy_engine.h"
+#include "phy_collision.h"
+
+// ========================================================================================================
+//
+//												  GLOBAL FUNCTIONALITY
+// 
+// ========================================================================================================
+namespace Physics {
+	
+float sleepEpsilon;
+
+void setSleepEpsilon(float value) {
+	sleepEpsilon = value;
+}
+float getSleepEpsilon() {
+	return sleepEpsilon;
+}
+
+// ========================================================================================================
+//
+//                                              RIGID BODY FUNCTIONALITY
+// 
+// ========================================================================================================
+
+void RigidBody::setMass(const float mass) {
+	assert(mass != 0);
+	RigidBody::inverseMass = ((float)1.0)/mass;
+}
+float RigidBody::getMass() const {
+	if (inverseMass == 0) {
+		return DBL_MAX;
+	}
+	else {
+		return ((float)1.0) / inverseMass;
+	}
+}
+
+void RigidBody::setInverseMass(const float inverseMass) {
+	RigidBody::inverseMass = inverseMass;
+}
+float RigidBody::getInverseMass() const {
+	return inverseMass;
+}
+
+bool RigidBody::hasFiniteMass() {
+	return inverseMass >= 0.0f;
+}
+
+void RigidBody::setInertiaTensor(const glm::mat3& inertiaTensor) {
+	inverseInertiaTensor = glm::inverse(inertiaTensor);
+}
+glm::mat3 RigidBody::getInertiaTensor() const {
+	return glm::inverse(inverseInertiaTensor);
+}
+
+glm::mat3 RigidBody::getInertiaTensorWorld() const {
+	return glm::inverse(inverseInertiaTensorWorld);
+}
+
+void RigidBody::setInverseInertiaTensor(glm::mat3 inverseInertiaTensor) {
+	RigidBody::inverseInertiaTensor = inverseInertiaTensor;
+}
+glm::mat3 RigidBody::getInverseInertiaTensor() const {
+	return inverseInertiaTensor;
+}
+glm::mat3 RigidBody::getInverseInertiaTensorWorld() const {
+	return inverseInertiaTensorWorld;
+}
+
+void RigidBody::setDamping(const float linearDamping, const float angularDamping) {
+	RigidBody::linearDamping = linearDamping;
+	RigidBody::angularDamping = angularDamping;
+}
+
+void RigidBody::setLinearDamping(const float linearDamping) {
+	RigidBody::linearDamping = linearDamping;
+}
+float RigidBody::getLinearDamping() const {
+	return linearDamping;
+}
+
+void RigidBody::setAngularDamping(const float angularDamping) {
+	RigidBody::angularDamping = angularDamping;
+}
+float RigidBody::getAngularDamping() const {
+	return angularDamping;
+}
+
+void RigidBody::setPosition(const glm::vec3 position) {
+	RigidBody::position = position;
+}
+void RigidBody::setPosition(const float x, const float y, const float z) {
+	position.x = x;
+	position.y = y;
+	position.z = z;
+}
+glm::vec3 RigidBody::getPosition() const {
+	return position;
+}
+
+void RigidBody::setOrientation(const glm::quat& orientation) {
+	RigidBody::orientation = orientation;
+	glm::normalize(RigidBody::orientation);
+}
+void RigidBody::setOrientation(const float r, const float i, const float j, const float k) {
+	orientation.x = r;
+	orientation.y = i;
+	orientation.z = j;
+	orientation.w = k;
+	glm::normalize(orientation);
+}
+glm::quat RigidBody::getOrientation() const {
+	return orientation;
+}
+
+glm::mat4 RigidBody::getTransform() const {
+	return transformMatrix;
+}
+
+glm::vec3 RigidBody::getPointInLocalSpace(const glm::vec3 point) const {
+	glm::vec3 pointWorld = point;
+
+	glm::vec3 translation = transformMatrix[3];
+	pointWorld -= translation;
+
+	// Inverse of rotation is it's transpose
+	glm::mat3 rotation = glm::transpose(glm::mat3(transformMatrix));
+
+	return pointWorld * rotation;
+}
+glm::vec3 RigidBody::getPointInWorldSpace(const glm::vec3 point) const {
+	glm::vec4 pointLocal = glm::vec4(point, 1);
+	return glm::vec3(transformMatrix * pointLocal);
+}
+glm::vec3 RigidBody::getDirectiontInLocalSpace(const glm::vec3 direction) const {
+	glm::mat3 rotation = glm::inverse(glm::mat3(transformMatrix));
+	return rotation * direction;
+}
+glm::vec3 RigidBody::getDirectiontInWorldSpace(const glm::vec3 direction) const {
+	glm::mat3 rotation = glm::mat3(transformMatrix);
+	return rotation * direction;
+}
+
+void RigidBody::setVelocity(const glm::vec3 velocity) {
+	RigidBody::velocity = velocity;
+}
+void RigidBody::setVelocity(const float x, const float y, const float z) {
+	velocity.x = x;
+	velocity.y = y;
+	velocity.z = z;
+}
+glm::vec3 RigidBody::getVelocity() const {
+	return velocity;
+}
+void RigidBody::addVelocity(const glm::vec3 deltaVelocity) {
+	velocity += deltaVelocity;
+}
+
+void RigidBody::setRotation(const glm::vec3 rotation) {
+	RigidBody::rotation = rotation;
+}
+void RigidBody::setRotation(const float x, const float y, const float z) {
+	rotation.x = x;
+	rotation.y = y;
+	rotation.z = z;
+}
+glm::vec3 RigidBody::getRotation() const {
+	return rotation;
+}
+void RigidBody::addRotation(const glm::vec3 deltaRotation) {
+	rotation += deltaRotation;
+}
+
+void RigidBody::setAcceleration(const glm::vec3 acceleration) {
+	RigidBody::acceleration = acceleration;
+}
+void RigidBody::setAcceleration(const float x, const float y, const float z) {
+	acceleration.x = x;
+	acceleration.y = y;
+	acceleration.z = z;
+}
+glm::vec3 RigidBody::getAcceleration() const {
+	return acceleration;
+}
+glm::vec3 RigidBody::getLastFrameAcceleration() const {
+	return lastFrameAcceleration;
+}
+
+void RigidBody::addForce(glm::vec3 force) {
+	forceAccum += force;
+	isAwake = true;
+}
+void RigidBody::addForceAtPoint(glm::vec3 force, glm::vec3 point) {
+	// Convert to coordinates relative to center of mass
+	glm::vec3 pt = point;
+	pt -= position;
+
+	forceAccum += force;
+	torqueAccum += glm::cross(pt, force);
+
+	isAwake = true;
+}
+void RigidBody::addForceAtBodyPoint(glm::vec3 force, glm::vec3 point) {
+	// Convert to coordinates relative to center of mass
+	glm::vec3 worldPoint = getPointInWorldSpace(point);
+	addForceAtPoint(force, worldPoint);
+}
+void RigidBody::addTorque(glm::vec3 torque) {
+	torqueAccum += torque;
+	isAwake = true;
+}
+
+glm::quat RigidBody::applyRotation(glm::quat currentRotation, glm::quat multiplier, float scale) {
+	glm::quat q = currentRotation;
+	glm::quat returnee;
+
+	returnee.x = q.x * multiplier.x - q.y * multiplier.y - q.z * multiplier.z - q.w * multiplier.w;
+	returnee.y = q.x * multiplier.y + q.y * multiplier.x + q.z * multiplier.w - q.w * multiplier.z;
+	returnee.z = q.x * multiplier.z + q.z * multiplier.x + q.w * multiplier.y - q.y * multiplier.w;
+	returnee.w = q.x * multiplier.w + q.w * multiplier.x + q.y * multiplier.z - q.z * multiplier.y;
+
+	return returnee;
+}
+
+static inline void transformInertiaTensor(glm::mat3& iitWorld, const glm::quat& q, const glm::mat3& iitbody, const glm::mat4& rotmat)
+{
+	float t4 = rotmat[0][0] * iitbody[0][0] + rotmat[1][0] * iitbody[0][1] + rotmat[2][0] * iitbody[0][2];
+
+	float t9 = rotmat[0][0] * iitbody[1][0] + rotmat[1][0] * iitbody[1][1] + rotmat[2][0] * iitbody[1][2];
+	float t14 = rotmat[0][0] * iitbody[2][0] + rotmat[1][0] * iitbody[2][1] + rotmat[2][0] * iitbody[2][2];
+	float t28 = rotmat[0][1] * iitbody[0][0] + rotmat[1][1] * iitbody[0][1] + rotmat[2][1] * iitbody[0][2];
+	float t33 = rotmat[0][1] * iitbody[1][0] + rotmat[1][1] * iitbody[1][1] + rotmat[2][1] * iitbody[1][2];
+	float t38 = rotmat[0][1] * iitbody[2][0] + rotmat[1][1] * iitbody[2][1] + rotmat[2][1] * iitbody[2][2];
+	float t52 = rotmat[0][2] * iitbody[0][0] + rotmat[1][2] * iitbody[0][1] + rotmat[2][2] * iitbody[0][2];
+	float t57 = rotmat[0][2] * iitbody[1][0] + rotmat[1][2] * iitbody[1][1] + rotmat[2][2] * iitbody[1][2];
+	float t62 = rotmat[0][2] * iitbody[2][0] + rotmat[1][2] * iitbody[2][1] + rotmat[2][2] * iitbody[2][2];
+
+	iitWorld[0][0] = t4 * rotmat[0][0] + t9 * rotmat[1][0] + t14 * rotmat[2][0];
+	iitWorld[1][0] = t4 * rotmat[0][1] + t9 * rotmat[1][1] + t14 * rotmat[2][1];
+	iitWorld[2][0] = t4 * rotmat[0][2] + t9 * rotmat[1][2] + t14 * rotmat[2][2];
+	iitWorld[0][1] = t28 * rotmat[0][0] + t33 * rotmat[1][0] + t38 * rotmat[2][0];
+	iitWorld[1][1] = t28 * rotmat[0][1] + t33 * rotmat[1][1] + t38 * rotmat[2][1];
+	iitWorld[2][1] = t28 * rotmat[0][2] + t33 * rotmat[1][2] + t38 * rotmat[2][2];
+	iitWorld[0][2] = t52 * rotmat[0][0] + t57 * rotmat[1][0] + t62 * rotmat[2][0];
+	iitWorld[1][2] = t52 * rotmat[0][1] + t57 * rotmat[1][1] + t62 * rotmat[2][1];
+	iitWorld[2][2] = t52 * rotmat[0][2] + t57 * rotmat[1][2] + t62 * rotmat[2][2];
+}
+
+static inline void calculateTransformMatrix(glm::mat4 &transformMatrix, const glm::vec3 &position, const glm::quat &orientation) {
+	transformMatrix[0][0] = 1 - 2 * orientation.z * orientation.z - 2 * orientation.w * orientation.w;
+	transformMatrix[1][0] = 2 * orientation.y * orientation.z - 2 * orientation.x * orientation.w;
+	transformMatrix[2][0] = 2 * orientation.y * orientation.w + 2 * orientation.x * orientation.z;
+	transformMatrix[3][0] = position.x;
+	
+	transformMatrix[0][1] = 2 * orientation.y * orientation.z + 2 * orientation.x * orientation.w;
+	transformMatrix[1][1] = 1 - 2 * orientation.y * orientation.y - 2 * orientation.w * orientation.w;
+	transformMatrix[2][1] = 2 * orientation.z * orientation.w - 2 * orientation.x * orientation.y;
+	transformMatrix[3][1] = position.y;
+	
+	transformMatrix[0][2] = 2 * orientation.y * orientation.w - 2 * orientation.x * orientation.z;
+	transformMatrix[1][2] = 2 * orientation.z * orientation.w + 2 * orientation.x * orientation.y;
+	transformMatrix[2][2] = 1 - 2 * orientation.y * orientation.y - 2 * orientation.z * orientation.z;
+	transformMatrix[3][2] = position.z;
+}
+
+void RigidBody::calculateDerivedData() {
+	// Normalise the orientation
+	orientation = glm::normalize(orientation);
+	//printf("Orientation normaed: %s\n", glm::to_string(orientation).c_str());
+
+	// Calculate Transform Matrix - Obtain rotation matrix from quaternion & leave bottom row uninitialised
+	//glm::mat4 newRot = glm::toMat4(orientation);
+	//transformMatrix = glm::translate(rotation, position);
+	/*transformMatrix = newRot;
+	transformMatrix[3] = glm::vec4(position, 1.0);*/
+	//printf("Before Calc: %s\n", glm::to_string(transformMatrix).c_str());
+	transformMatrix = glm::mat4();
+	transformMatrix[3][3] = 1;
+	calculateTransformMatrix(transformMatrix, position, orientation);
+	//printf("After Calc: %s\n", glm::to_string(transformMatrix).c_str());
+
+	// Calculate Inertia Tensor
+	// https://www.gamedev.net/forums/topic/547002-debugging-my-physics-engine--how-to-transform-inertia-tensor-correctly
+	// inverseInertiaTensor = glm::mat3(transformMatrix) * inverseInertiaTensor;
+	/*glm::mat3 orientationMatrx = glm::toMat3(orientation);
+	inverseInertiaTensorWorld = orientationMatrx * inverseInertiaTensor * glm::transpose(orientationMatrx);*/
+	transformInertiaTensor(inverseInertiaTensorWorld, orientation, inverseInertiaTensor, transformMatrix);
+}
+void RigidBody::integrate(float duration) {
+	if (!isAwake) return;
+
+	// Calculate linear acceleration from force inputs
+	lastFrameAcceleration = acceleration;
+	lastFrameAcceleration += (forceAccum * inverseMass);
+
+	// Calculate angular acceleration from torque inputs
+	glm::vec3 angularAcceleration = inverseInertiaTensorWorld * torqueAccum;
+
+	// Adjust velocities
+	// Update linear velocity from both acceleration and impulse
+	// Update angular velocity form both acceleration and impulse
+	velocity += lastFrameAcceleration * duration;
+	rotation += angularAcceleration * duration;
+
+	// Impose drag
+	velocity *= powf(linearDamping, duration);
+	rotation *= powf(angularDamping, duration);
+
+	// Adjust positions
+	// Update linear position
+	position += velocity * duration;
+	
+	// Update angular position
+	//printf("Orientation before: %s\n", glm::to_string(orientation).c_str());
+	orientation = orientation + (orientation * glm::quat(rotation * duration) * (float)0.5);
+	//printf("Orientation after: %s\n", glm::to_string(orientation).c_str());
+	/*glm::quat newRot = glm::quat(0, rotation.x * duration, rotation.y * duration, rotation.z * duration);
+	newRot = applyRotation(newRot, orientation, duration);
+	orientation.x += newRot.x * (float)0.5;
+	orientation.y += newRot.y * (float)0.5;
+	orientation.z += newRot.z * (float)0.5;
+	orientation.w += newRot.w * (float)0.5;*/
+
+	// Normalise orientation and update matrices with new position and orientation
+	calculateDerivedData();
+
+	// Clear accumulators
+	clearAccumulators();
+
+	// Update kinetic energy store and possibly put body to sleep
+	if (canSleep) {
+		float currentMotion = glm::dot(velocity, velocity) + glm::dot(rotation, rotation);
+
+		float bias = powf(0.5, duration);
+		motion = bias * motion + (1 - bias) * currentMotion;
+
+		if (motion < sleepEpsilon) setAwake(false);
+		else if (motion > 10 * sleepEpsilon) motion = 10 * sleepEpsilon;
+	}
+
+}
+void RigidBody::clearAccumulators() {
+	forceAccum = glm::vec3(0);
+	torqueAccum = glm::vec3(0);
+}
+
+void RigidBody::setAwake(const bool awake) {
+	if (awake) {
+		isAwake = true;
+
+		// Add a bit of motion to avoid it falling asleep immediately
+		motion = sleepEpsilon * 2.0f;
+	}
+	else {
+		isAwake = false;
+		velocity = glm::vec3(0);
+		rotation = glm::vec3(0);
+	}
+}
+bool RigidBody::getAwake() const {
+	return isAwake;
+}
+void RigidBody::setCanSleep(const bool canSleep) {
+	RigidBody::canSleep = canSleep;
+	if (!canSleep && !isAwake) {
+		setAwake();
+	}
+}
+bool RigidBody::getCanSleep() const {
+	return canSleep;
+}
+
+// ========================================================================================================
+//
+//                                           COLLISION PRIMITIVE FUNCTIONALITY
+// 
+// ========================================================================================================
+
+void CollisionPrimitive::calculateInternals() {
+	//printf("offset: %s\n", glm::to_string(offset).c_str());
+	transform = body->getTransform() * offset;
+}
+glm::vec3 CollisionPrimitive::getAxis(unsigned index) const {
+	return transform[index];
+}
+const glm::mat4& CollisionPrimitive::getTransform() const {
+	return transform;
+}
+
+// ========================================================================================================
+//
+//                                           COLLISION DETECTION FUNCTIONALITY
+// 
+// ========================================================================================================
+
+glm::vec3 transformInverse(const glm::mat4 transformMatrix, const glm::vec3& vector) {
+	glm::vec3 tmp = vector;
+	tmp.x -= transformMatrix[3].x;
+	tmp.y -= transformMatrix[3].y;
+	tmp.z -= transformMatrix[3].z;
+	return glm::vec3(
+		tmp.x * transformMatrix[0].x +
+		tmp.y * transformMatrix[0].y +
+		tmp.z * transformMatrix[0].z,
+		
+		tmp.x * transformMatrix[1].x +
+		tmp.y * transformMatrix[1].y +
+		tmp.z * transformMatrix[1].z,
+
+		tmp.x * transformMatrix[2].x +
+		tmp.y * transformMatrix[2].y +
+		tmp.z * transformMatrix[2].z
+	);
+}
+
+bool CollisionData::hasMoreContacts() {
+	return contactsLeft > 0;
+}
+void CollisionData::reset(unsigned maxContacts) {
+	contactsLeft = maxContacts;
+	contactCount = 0;
+	contacts = contactArray;
+}
+void CollisionData::addContacts(unsigned count) {
+	contactsLeft -= count;
+	contactCount += count;
+	contacts += count;
+}
+
+static inline float transformToAxis(const CollisionBox& box, const glm::vec3& axis) {
+	return
+		box.halfSize.x * fabsf(glm::dot(axis, box.getAxis(0))) +
+		box.halfSize.y * fabsf(glm::dot(axis, box.getAxis(1))) +
+		box.halfSize.z * fabsf(glm::dot(axis, box.getAxis(2)));
+}
+bool IntersectionTests::boxAndHalfSpace(const CollisionBox& box, const CollisionPlane& plane) {
+	// Work out the projected radius of the box onto the plane direction
+	float projectedRadius = transformToAxis(box, plane.direction);
+
+	// Work out how far the box is from the origin 
+	float boxDistance = glm::dot(plane.direction, box.getAxis(3)) - projectedRadius;
+
+	// Check for the intersection
+	return boxDistance <= plane.offset;
+}
+unsigned CollisionDetector::boxAndHalfSpace(const CollisionBox& box, const CollisionPlane& plane, CollisionData* data) {
+	// Make sure we have contacts
+	if (data->contactsLeft <= 0) return 0;
+
+	// Check for intersection
+	if (!IntersectionTests::boxAndHalfSpace(box, plane))
+	{
+		printf("\r No Intersection");
+		return 0;
+	}
+
+	printf("\r Ye Intersection");
+
+	// We have an intersection, so find the intersection points. We can make
+	// do with only checking vertices. If the box is resting on a plane
+	// or on an edge, it will be reported as four or two contact points.
+
+	// Go through each combination of + and - for each half-size
+	static float mults[8][3] = { {1,1,1},{-1,1,1},{1,-1,1},{-1,-1,1},
+							   {1,1,-1},{-1,1,-1},{1,-1,-1},{-1,-1,-1} };
+
+	Contact* contact = data->contacts;
+	unsigned contactsUsed = 0;
+	for (unsigned i = 0; i < 8; i++) {
+
+		// Calculate the position of each vertex
+		glm::vec3 vertexPos(mults[i][0], mults[i][1], mults[i][2]);
+		vertexPos.x = vertexPos.x * box.halfSize.x;
+		vertexPos.y = vertexPos.y * box.halfSize.y;
+		vertexPos.z = vertexPos.z * box.halfSize.z;
+		glm::vec4 vPos = box.transform * glm::vec4(vertexPos.x, vertexPos.y, vertexPos.z, 1);
+		vertexPos = glm::vec3(vPos.x, vPos.y, vPos.z);
+
+		// Calculate the distance from the plane
+		float vertexDistance = glm::dot(vertexPos, plane.direction);
+
+		// Compare this to the plane's distance
+		if (vertexDistance <= plane.offset)
+		{
+			// Create the contact data.
+			// The contact point is halfway between the vertex and the
+			// plane - we multiply the direction by half the separation
+			// distance and add the vertex location.
+			contact->contactPoint = plane.direction;
+			contact->contactPoint *= (vertexDistance - plane.offset);
+			contact->contactPoint += vertexPos;
+			contact->contactNormal = plane.direction;
+			contact->penetration = plane.offset - vertexDistance;
+
+			// Write the appropriate data
+			contact->setBodyData(box.body, NULL,
+				data->friction, data->restitution);
+
+			// Move onto the next contact
+			contact++;
+			contactsUsed++;
+			if (contactsUsed == (unsigned)data->contactsLeft) return contactsUsed;
+		}
+	}
+
+	data->addContacts(contactsUsed);
+	return contactsUsed;
+}
+
+// ========================================================================================================
+//
+//												   CONTACT DATA STRUCTS
+//
+// ========================================================================================================
+
+void Contact::setBodyData(RigidBody* one, RigidBody* two, float friction, float restitution) {
+	Contact::body[0] = one;
+	Contact::body[1] = two;
+	Contact::friction = friction;
+	Contact::restitution = restitution;
+}
+void Contact::swapBodies() {
+	contactNormal *= -1;
+	RigidBody* temp = body[0];
+
+	body[0] = body[1];
+	body[1] = temp;
+}
+void Contact::matchAwakeState() {
+	// Collisions with the world never cause a body to wake up
+	if (!body[1]) return;
+
+	bool body0Awake = body[0]->getAwake();
+	bool body1Awake = body[1]->getAwake();
+
+	// Wake up only sleeping one
+	if (body0Awake ^ body1Awake) {
+		if (body0Awake) body[1]->setAwake();
+		else body[0]->setAwake();
+	}
+}
+
+inline void Contact::calculateContactBasis()
+{
+	glm::vec3 contactTangent[2];
+
+	// Check whether the Z-axis is nearer to the X or Y axis
+	if (fabsf(contactNormal.x) > fabsf(contactNormal.y))
+	{
+		// Scaling factor to ensure the results are normalised
+		const float s = (float)1.0f / sqrtf(contactNormal.z * contactNormal.z +
+			contactNormal.x * contactNormal.x);
+
+		// The new X-axis is at right angles to the world Y-axis
+		contactTangent[0].x = contactNormal.z * s;
+		contactTangent[0].y = 0;
+		contactTangent[0].z = -contactNormal.x * s;
+
+		// The new Y-axis is at right angles to the new X- and Z- axes
+		contactTangent[1].x = contactNormal.y * contactTangent[0].x;
+		contactTangent[1].y = contactNormal.z * contactTangent[0].x -
+			contactNormal.x * contactTangent[0].z;
+		contactTangent[1].z = -contactNormal.y * contactTangent[0].x;
+	}
+	else
+	{
+		// Scaling factor to ensure the results are normalised
+		const float s = (float)1.0 / sqrtf(contactNormal.z * contactNormal.z +
+			contactNormal.y * contactNormal.y);
+
+		// The new X-axis is at right angles to the world X-axis
+		contactTangent[0].x = 0;
+		contactTangent[0].y = -contactNormal.z * s;
+		contactTangent[0].z = contactNormal.y * s;
+
+		// The new Y-axis is at right angles to the new X- and Z- axes
+		contactTangent[1].x = contactNormal.y * contactTangent[0].z -
+			contactNormal.z * contactTangent[0].y;
+		contactTangent[1].y = -contactNormal.x * contactTangent[0].z;
+		contactTangent[1].z = contactNormal.x * contactTangent[0].y;
+	}
+
+	// Make a matrix from the three vectors.
+	contactToWorld = glm::mat3();
+	contactToWorld[0] = contactNormal;
+	contactToWorld[1] = contactTangent[0];
+	contactToWorld[2] = contactTangent[1];
+}
+
+void Contact::calculateInternals(float duration)
+{
+	// Check if the first object is NULL, and swap if it is.
+	if (!body[0]) swapBodies();
+	assert(body[0]);
+
+	// Calculate an set of axis at the contact point.
+	calculateContactBasis();
+
+	// Store the relative position of the contact relative to each body
+	relativeContactPosition[0] = contactPoint - body[0]->getPosition();
+	if (body[1]) {
+		relativeContactPosition[1] = contactPoint - body[1]->getPosition();
+	}
+
+	// Find the relative velocity of the bodies at the contact point.
+	contactVelocity = calculateLocalVelocity(0, duration);
+	if (body[1]) {
+		contactVelocity -= calculateLocalVelocity(1, duration);
+	}
+
+	// Calculate the desired change in velocity for resolution
+	calculateDesiredDeltaVelocity(duration);
+}
+void Contact::calculateDesiredDeltaVelocity(float duration)
+{
+	const static float velocityLimit = (float)0.25f;
+
+	// Calculate the acceleration induced velocity accumulated this frame
+	float velocityFromAcc = 0;
+
+	if (body[0]->getAwake())
+	{
+		velocityFromAcc += glm::dot(body[0]->getLastFrameAcceleration() * duration, contactNormal);
+	}
+
+	if (body[1] && body[1]->getAwake())
+	{
+		velocityFromAcc -= glm::dot(body[1]->getLastFrameAcceleration() * duration,  contactNormal);
+	}
+
+	// If the velocity is very slow, limit the restitution
+	float thisRestitution = restitution;
+	if (fabsf(contactVelocity.x) < velocityLimit)
+	{
+		thisRestitution = (float)0.0f;
+	}
+
+	// Combine the bounce velocity with the removed
+	// acceleration velocity.
+	desiredDeltaVelocity =
+		-contactVelocity.x
+		- thisRestitution * (contactVelocity.x - velocityFromAcc);
+}
+glm::vec3 Contact::calculateLocalVelocity(unsigned bodyIndex, float duration)
+{
+	RigidBody* thisBody = body[bodyIndex];
+
+	// Work out the velocity of the contact point.
+	glm::vec3 velocity = glm::cross(thisBody->getRotation(), relativeContactPosition[bodyIndex]);
+	velocity += thisBody->getVelocity();
+
+	// Turn the velocity into contact-coordinates.
+	glm::vec3 contactVelocity = glm::transpose(contactToWorld) * velocity;
+
+	// Calculate the ammount of velocity that is due to forces without
+	// reactions.
+	glm::vec3 accVelocity = thisBody->getLastFrameAcceleration() * duration;
+
+	// Calculate the velocity in contact-coordinates.
+	accVelocity = glm::transpose(contactToWorld) * accVelocity;
+
+	// We ignore any component of acceleration in the contact normal
+	// direction, we are only interested in planar acceleration
+	accVelocity.x = 0;
+
+	// Add the planar velocities - if there's enough friction they will
+	// be removed during velocity resolution
+	contactVelocity += accVelocity;
+
+	// And return it
+	return contactVelocity;
+}
+
+inline glm::vec3 Contact::calculateFrictionlessImpulse(glm::mat3* inverseInertiaTensor) {
+	glm::vec3 impulseContact;
+
+	// Build vector that shows the change in velocity in world space for a unit impulse in direction of contact normal
+	glm::vec3 deltaVelWorld = glm::cross(relativeContactPosition[0], contactNormal);
+	deltaVelWorld = inverseInertiaTensor[0] * deltaVelWorld;
+	deltaVelWorld = glm::cross(deltaVelWorld, relativeContactPosition[0]);
+
+	// Work out change in velocity in contact coordinates
+	float deltaVelocity = glm::dot(deltaVelWorld, contactNormal);
+
+	// Add linear component of velocity change
+	deltaVelocity += body[0]->getInverseMass();
+
+	// Check whether we need to consider second body's data
+	if (body[1]) {
+		// Go through same transformation sequence again
+		glm::vec3 deltaVelWorld = glm::cross(relativeContactPosition[1], contactNormal);
+		deltaVelWorld = inverseInertiaTensor[1] * deltaVelWorld;
+		deltaVelWorld = glm::cross(deltaVelWorld, relativeContactPosition[1]);
+
+		// Add change in velocity due to rotation
+		deltaVelocity += glm::dot(deltaVelWorld, contactNormal);
+
+		// Add change in velocity due to linear motion
+		deltaVelocity += body[1]->getInverseMass();
+	}
+
+	// Calculate required size of the impulse
+	impulseContact.x = desiredDeltaVelocity / deltaVelocity;
+	impulseContact.y = 0;
+	impulseContact.z = 0;
+	
+	// Return the impulse
+	return impulseContact;
+}
+void setSkewSymmetric(glm::mat3& matrix, const glm::vec3 vector) {
+	matrix[0][0] = matrix[1][1] = matrix[2][2] = 0;
+
+	matrix[1][0] = -vector.z;
+	matrix[2][0] = vector.y;
+
+	matrix[0][1] = vector.z;
+	matrix[2][1] = -vector.x;
+
+	matrix[0][2] = -vector.y;
+	matrix[1][2] = vector.x;
+}
+inline glm::vec3 Contact::calculateFrictionImpulse(glm::mat3* inverseInertiaTensor)
+{
+	glm::vec3 impulseContact;
+	float inverseMass = body[0]->getInverseMass();
+
+	// The equivalent of a cross product in matrices is multiplication
+	// by a skew symmetric matrix - we build the matrix for converting
+	// between linear and angular quantities.
+	glm::mat3 impulseToTorque;
+	//impulseToTorque = glm::matrixCross3(relativeContactPosition[0]);
+	setSkewSymmetric(impulseToTorque, relativeContactPosition[0]);
+
+	// Build the matrix to convert contact impulse to change in velocity
+	// in world coordinates.
+	glm::mat3 deltaVelWorld = impulseToTorque;
+	deltaVelWorld *= inverseInertiaTensor[0];
+	deltaVelWorld *= impulseToTorque;
+	deltaVelWorld *= -1;
+
+	// Check if we need to add body two's data
+	if (body[1])
+	{
+		// Set the cross product matrix
+		//impulseToTorque = glm::matrixCross3(relativeContactPosition[1]);
+		setSkewSymmetric(impulseToTorque, relativeContactPosition[1]);
+
+		// Calculate the velocity change matrix
+		glm::mat3 deltaVelWorld2 = impulseToTorque;
+		deltaVelWorld2 *= inverseInertiaTensor[1];
+		deltaVelWorld2 *= impulseToTorque;
+		deltaVelWorld2 *= -1;
+
+		// Add to the total delta velocity.
+		deltaVelWorld += deltaVelWorld2;
+
+		// Add to the inverse mass
+		inverseMass += body[1]->getInverseMass();
+	}
+
+	// Do a change of basis to convert into contact coordinates.
+	glm::mat3 deltaVelocity = glm::transpose(contactToWorld);
+	deltaVelocity *= deltaVelWorld;
+	deltaVelocity *= contactToWorld;
+
+	// Add in the linear velocity change
+	deltaVelocity[0][0] += inverseMass;
+	deltaVelocity[1][1] += inverseMass;
+	deltaVelocity[2][2] += inverseMass;
+
+	// Invert to get the impulse needed per unit velocity
+	glm::mat3 impulseMatrix = glm::inverse(deltaVelocity);
+
+	// Find the target velocities to kill
+	glm::vec3 velKill(desiredDeltaVelocity,
+		-contactVelocity.y,
+		-contactVelocity.z);
+
+	// Find the impulse to kill target velocities
+	impulseContact = impulseMatrix * velKill;
+
+	// Check for exceeding friction
+	float planarImpulse = sqrtf(
+		impulseContact.y * impulseContact.y +
+		impulseContact.z * impulseContact.z
+	);
+	if (planarImpulse > impulseContact.x * friction)
+	{
+		// We need to use dynamic friction
+		impulseContact.y /= planarImpulse;
+		impulseContact.z /= planarImpulse;
+
+		impulseContact.x = deltaVelocity[0][0] +
+			deltaVelocity[1][0] * friction * impulseContact.y +
+			deltaVelocity[2][0] * friction * impulseContact.z;
+		impulseContact.x = desiredDeltaVelocity / impulseContact.x;
+		impulseContact.y *= friction * impulseContact.x;
+		impulseContact.z *= friction * impulseContact.x;
+	}
+	return impulseContact;
+}
+
+void Contact::applyVelocityChange(glm::vec3 velocityChange[2], glm::vec3 rotationChange[2])
+{
+	// Get hold of the inverse mass and inverse inertia tensor, both in
+	// world coordinates.
+	glm::mat3 inverseInertiaTensor[2];
+	inverseInertiaTensor[0] = body[0]->getInverseInertiaTensorWorld();
+
+	if (body[1])
+		inverseInertiaTensor[1] = body[1]->getInverseInertiaTensorWorld();
+
+	// We will calculate the impulse for each contact axis
+	glm::vec3 impulseContact;
+
+	if (friction == (float)0.0)
+	{
+		// Use the short format for frictionless contacts
+		impulseContact = calculateFrictionlessImpulse(inverseInertiaTensor);
+	}
+	else
+	{
+		// Otherwise we may have impulses that aren't in the direction of the
+		// contact, so we need the more complex version.
+		impulseContact = calculateFrictionImpulse(inverseInertiaTensor);
+	}
+
+	// Convert impulse to world coordinates
+	glm::vec3 impulse = contactToWorld * impulseContact;
+
+	// Split in the impulse into linear and rotational components
+	glm::vec3 impulsiveTorque = glm::cross(relativeContactPosition[0], impulse);
+	rotationChange[0] = inverseInertiaTensor[0] * impulsiveTorque;
+	velocityChange[0] = glm::vec3(0);
+	velocityChange[0] += (impulse * body[0]->getInverseMass());
+
+	// Apply the changes
+	body[0]->addVelocity(velocityChange[0]);
+	body[0]->addRotation(rotationChange[0]);
+
+	if (body[1])
+	{
+		// Work out body one's linear and angular changes
+		glm::vec3 impulsiveTorque = glm::cross(impulse, relativeContactPosition[1]);
+		rotationChange[1] = inverseInertiaTensor[1] * (impulsiveTorque);
+		velocityChange[1] = glm::vec3(0);
+		velocityChange[1] += (impulse * -body[1]->getInverseMass());
+
+		// And apply them.
+		body[1]->addVelocity(velocityChange[1]);
+		body[1]->addRotation(rotationChange[1]);
+	}
+}
+void Contact::applyPositionChange(glm::vec3 linearChange[2], glm::vec3 angularChange[2], float penetration)
+{
+	const float angularLimit = (float)0.2f;
+	float angularMove[2];
+	float linearMove[2];
+
+	float totalInertia = 0;
+	float linearInertia[2];
+	float angularInertia[2];
+
+	// We need to work out the inertia of each object in the direction
+	// of the contact normal, due to angular inertia only.
+	for (unsigned i = 0; i < 2; i++) if (body[i])
+	{
+		glm::mat3 inverseInertiaTensor = body[i]->getInverseInertiaTensorWorld();
+
+		// Use the same procedure as for calculating frictionless
+		// velocity change to work out the angular inertia.
+		glm::vec3 angularInertiaWorld = glm::cross(relativeContactPosition[i], contactNormal);
+		angularInertiaWorld = inverseInertiaTensor * angularInertiaWorld;
+		angularInertiaWorld = glm::cross(angularInertiaWorld, relativeContactPosition[i]);
+		angularInertia[i] = glm::dot(angularInertiaWorld, contactNormal);
+
+		// The linear component is simply the inverse mass
+		linearInertia[i] = body[i]->getInverseMass();
+
+		// Keep track of the total inertia from all components
+		totalInertia += linearInertia[i] + angularInertia[i];
+
+		// We break the loop here so that the totalInertia value is
+		// completely calculated (by both iterations) before
+		// continuing.
+	}
+
+	// Loop through again calculating and applying the changes
+	for (unsigned i = 0; i < 2; i++) if (body[i])
+	{
+		// The linear and angular movements required are in proportion to
+		// the two inverse inertias.
+		float sign = (i == 0) ? 1 : -1;
+		angularMove[i] =
+			sign * penetration * (angularInertia[i] / totalInertia);
+		linearMove[i] =
+			sign * penetration * (linearInertia[i] / totalInertia);
+
+		// To avoid angular projections that are too great (when mass is large
+		// but inertia tensor is small) limit the angular move.
+		glm::vec3 projection = relativeContactPosition[i];
+		projection += contactNormal * glm::dot(-relativeContactPosition[i], contactNormal);
+
+		// Use the small angle approximation for the sine of the angle (i.e.
+		// the magnitude would be sine(angularLimit) * projection.magnitude
+		// but we approximate sine(angularLimit) to angularLimit).
+		float maxMagnitude = angularLimit * glm::length(projection);
+
+		if (angularMove[i] < -maxMagnitude)
+		{
+			float totalMove = angularMove[i] + linearMove[i];
+			angularMove[i] = -maxMagnitude;
+			linearMove[i] = totalMove - angularMove[i];
+		}
+		else if (angularMove[i] > maxMagnitude)
+		{
+			float totalMove = angularMove[i] + linearMove[i];
+			angularMove[i] = maxMagnitude;
+			linearMove[i] = totalMove - angularMove[i];
+		}
+
+		// We have the linear amount of movement required by turning
+		// the rigid body (in angularMove[i]). We now need to
+		// calculate the desired rotation to achieve that.
+		if (angularMove[i] == 0)
+		{
+			// Easy case - no angular movement means no rotation.
+			angularChange[i] = glm::vec3(0);
+		}
+		else
+		{
+			// Work out the direction we'd like to rotate in.
+			glm::vec3 targetAngularDirection = glm::cross(relativeContactPosition[i], contactNormal);
+
+			glm::mat3 inverseInertiaTensor = body[i]->getInverseInertiaTensorWorld();
+
+			// Work out the direction we'd need to rotate to achieve that
+			angularChange[i] = (inverseInertiaTensor * targetAngularDirection) * (angularMove[i] / angularInertia[i]);
+		}
+
+		// Velocity change is easier - it is just the linear movement
+		// along the contact normal.
+		linearChange[i] = contactNormal * linearMove[i];
+
+		// Now we can start to apply the values we've calculated.
+		// Apply the linear movement
+		glm::vec3 pos = body[i]->getPosition();
+		pos += contactNormal * linearMove[i];
+		body[i]->setPosition(pos);
+
+		// And the change in orientation
+		glm::quat q = body[i]->getOrientation();
+		glm::quat newRotation = glm::quat(0, angularChange[i].x * (float)1.0, angularChange[i].y * (float)1.0, angularChange[i].z * (float)1.0);
+		newRotation = (newRotation * q);
+		q.x += newRotation.x * ((float)0.5);
+		q.y += newRotation.y * ((float)0.5);
+		q.z += newRotation.z * ((float)0.5);
+		q.w += newRotation.w * ((float)0.5);
+		body[i]->setOrientation(q);
+
+		// We need to calculate the derived data for any body that is
+		// asleep, so that the changes are reflected in the object's
+		// data. Otherwise the resolution will not change the position
+		// of the object, and the next collision detection round will
+		// have the same penetration.
+		if (!body[i]->getAwake()) body[i]->calculateDerivedData();
+	}
+}
+
+// ========================================================================================================
+//
+//                                             COLLISION RESOLUTION STRUCTS
+// 
+// ========================================================================================================
+
+ContactResolver::ContactResolver(unsigned iterations, float velocityEpsilon, float positionEpsilon) {
+	setIterations(iterations, iterations);
+	setEpsilon(velocityEpsilon, positionEpsilon);
+}
+ContactResolver::ContactResolver(unsigned velocityIterations, unsigned positionIterations, float velocityEpsilon, float positionEpsilon) {
+	setIterations(velocityIterations);
+	setEpsilon(velocityEpsilon, positionEpsilon);
+}
+
+bool ContactResolver::isValid() {
+	return 
+		(velocityIterations > 0) &&
+		(positionIterations > 0) &&
+		(positionEpsilon >= 0.0f) &&
+		(positionEpsilon >= 0.0f);
+}
+void ContactResolver::setIterations(unsigned iterations) {
+	setIterations(iterations, iterations);
+}
+void ContactResolver::setIterations(unsigned velocityIterations, unsigned positionIterations) {
+	ContactResolver::velocityIterations = velocityIterations;
+	ContactResolver::positionIterations = positionIterations;
+}
+void ContactResolver::setEpsilon(float velocityEpsilon, float positionEpsilon) {
+	ContactResolver::velocityEpsilon = velocityEpsilon;
+	ContactResolver::positionEpsilon = positionEpsilon;
+}
+
+void ContactResolver::prepareContacts(Contact* contacts, unsigned numContacts, float duration)
+{
+	// Generate contact velocity and axis information.
+	Contact* lastContact = contacts + numContacts;
+	for (Contact* contact = contacts; contact < lastContact; contact++)
+	{
+		// Calculate the internal contact data (inertia, basis, etc).
+		contact->calculateInternals(duration);
+	}
+}
+void ContactResolver::adjustPositions(Contact* c, unsigned numContacts, float duration)
+{
+	unsigned i, index;
+	glm::vec3 linearChange[2], angularChange[2];
+	float max;
+	glm::vec3 deltaPosition;
+
+	// iteratively resolve interpenetrations in order of severity.
+	positionIterationsUsed = 0;
+	while (positionIterationsUsed < positionIterations)
+	{
+		// Find biggest penetration
+		max = positionEpsilon;
+		index = numContacts;
+		for (i = 0; i < numContacts; i++)
+		{
+			if (c[i].penetration > max)
+			{
+				max = c[i].penetration;
+				index = i;
+			}
+		}
+		if (index == numContacts) break;
+
+		// Match the awake state at the contact
+		c[index].matchAwakeState();
+
+		// Resolve the penetration.
+		c[index].applyPositionChange(
+			linearChange,
+			angularChange,
+			max);
+
+		// Again this action may have changed the penetration of other
+		// bodies, so we update contacts.
+		for (i = 0; i < numContacts; i++)
+		{
+			// Check each body in the contact
+			for (unsigned b = 0; b < 2; b++) if (c[i].body[b])
+			{
+				// Check for a match with each body in the newly
+				// resolved contact
+				for (unsigned d = 0; d < 2; d++)
+				{
+					if (c[i].body[b] == c[index].body[d])
+					{
+						deltaPosition = linearChange[d] +
+							glm::cross(angularChange[d], c[i].relativeContactPosition[b]);
+
+						// The sign of the change is positive if we're
+						// dealing with the second body in a contact
+						// and negative otherwise (because we're
+						// subtracting the resolution)..
+						c[i].penetration += glm::dot(deltaPosition, c[i].contactNormal) * (b ? 1 : -1);
+					}
+				}
+			}
+		}
+		positionIterationsUsed++;
+	}
+}
+void ContactResolver::adjustVelocities(Contact* c,unsigned numContacts, float duration)
+{
+	glm::vec3 velocityChange[2], rotationChange[2];
+	glm::vec3 deltaVel;
+
+	// iteratively handle impacts in order of severity.
+	velocityIterationsUsed = 0;
+	while (velocityIterationsUsed < velocityIterations)
+	{
+		// Find contact with maximum magnitude of probable velocity change.
+		float max = velocityEpsilon;
+		unsigned index = numContacts;
+		for (unsigned i = 0; i < numContacts; i++)
+		{
+			if (c[i].desiredDeltaVelocity > max)
+			{
+				max = c[i].desiredDeltaVelocity;
+				index = i;
+			}
+		}
+		if (index == numContacts) break;
+
+		// Match the awake state at the contact
+		c[index].matchAwakeState();
+
+		// Do the resolution on the contact that came out top.
+		c[index].applyVelocityChange(velocityChange, rotationChange);
+
+		// With the change in velocity of the two bodies, the update of
+		// contact velocities means that some of the relative closing
+		// velocities need recomputing.
+		for (unsigned i = 0; i < numContacts; i++)
+		{
+			// Check each body in the contact
+			for (unsigned b = 0; b < 2; b++) if (c[i].body[b])
+			{
+				// Check for a match with each body in the newly
+				// resolved contact
+				for (unsigned d = 0; d < 2; d++)
+				{
+					if (c[i].body[b] == c[index].body[d])
+					{
+						deltaVel = velocityChange[d] +
+							glm::cross(rotationChange[d], c[i].relativeContactPosition[b]);
+
+						// The sign of the change is negative if we're dealing
+						// with the second body in a contact.
+						c[i].contactVelocity += (glm::transpose(c[i].contactToWorld) * deltaVel) * (b ? -1.f : 1.f);
+						c[i].calculateDesiredDeltaVelocity(duration);
+					}
+				}
+			}
+		}
+		velocityIterationsUsed++;
+	}
+}
+void ContactResolver::resolveContacts(Contact* contacts, unsigned numContacts, float durationOfFrame) {
+	// Make sure we have something to do
+	if (numContacts == 0) {
+		return;
+	}
+	if (!isValid()) {
+		return;
+	}
+
+	// Prepare the contacts for processing
+	//printf("\n ---------------- PREPARING CONTACTS -------------------\n");
+	prepareContacts(contacts, numContacts, durationOfFrame);
+
+	// Resolve the interpenetration problems with contacts
+	//printf("\n ---------------- ADJUSTING POSITIONS ------------------\n");
+	adjustPositions(contacts, numContacts, durationOfFrame);
+
+	// Resolve the velocity problems with the contacts
+	//printf("---------------- ADJUSTING VELOCITIES -----------------\n");
+	adjustVelocities(contacts, numContacts, durationOfFrame);
+
+	// Print final Positions and velocities
+	/*for (unsigned i = 0; i < numContacts; i++) {
+		for (unsigned b = 0; b < 2; b++) if (contacts[i].body[b]) {
+			printf("Final Position for body %d: %s\n", b, glm::to_string(contacts[i].body[b]->getPosition()).c_str());
+			printf("Final Velocity for body %d: %s\n", b, glm::to_string(contacts[i].body[b]->getVelocity()).c_str());
+		}
+	}*/
+	//printf("--------------------- COMPLETED ----------------------- \n");
+}
+
+
+
+
+
+
+// ========================================================================================================
+//
+//                                            PHYSICS ENGINE FUNCTIONALITY
+// 
+// ========================================================================================================
+//void PhysicsEngine::initialise() {
+//	fmt::println("Initialised Physics Engine!\n");
+//}
+//void PhysicsEngine::add_rigid_body() {
+//	fmt::println("Added Rigid Body!\n");
+//}
+//void PhysicsEngine::delete_rigid_body() {
+//	fmt::println("Deleted Rigid Body!\n");
+//}
+//void PhysicsEngine::update_particle() {
+//
+//}
+//void PhysicsEngine::update_physics() {
+//
+//}
+// ========================================================================================================
+//
+//												UNUSED FUNCTIONALITY
+// 
+// ========================================================================================================
+// ========================================================================================================
+//
+//                                           COARSE COLLISION FUNCTIONALITY
+// 
+// ========================================================================================================
+//// Bounding Sphere for Objects
+//BoundingSphere::BoundingSphere(const glm::vec3& centre, float radius) {
+//	BoundingSphere::centre = centre;
+//	BoundingSphere::radius = radius;
+//}
+//BoundingSphere::BoundingSphere(const BoundingSphere& one, const BoundingSphere& two) {
+//	glm::vec3 centreOffset = two.centre - one.centre;
+//	float distance = glm::length2(centreOffset);
+//	float radiusDiff = two.radius - one.radius;
+//
+//	// Check if larger sphere encloses small one
+//	if (radiusDiff*radiusDiff >= distance) {
+//		if (one.radius > two.radius) {
+//			centre = one.centre;
+//			radius = one.radius;
+//		}
+//		else {
+//			centre = two.centre;
+//			radius = two.radius;
+//		}
+//	}
+//
+//	// Otherwise one of the spheres is partially in the other - overlapping
+//	else {
+//		distance = sqrt(distance);
+//		radius = (distance + one.radius + two.radius) * (0.5f);
+//
+//		// the new centre is based on one's centre moved towards two's centre
+//		// by a proportional amount to the sphere's radii
+//		centre = one.centre;
+//		if (distance > 0) {
+//			centre += centreOffset * ((radius - one.radius)/distance);
+//		}
+//	}
+//}
+//bool BoundingSphere::overlaps(const BoundingSphere *other) const{
+//	float distanceSquared = glm::length2(centre - other->centre);
+//	return distanceSquared < (radius + other->radius) * (radius + other->radius);
+//}
+//float BoundingSphere::getGrowth(const BoundingSphere& other) const{
+//	BoundingSphere newSphere(*this, other);
+//
+//	// Return value proportional to change in surface area of sphere
+//	return newSphere.radius * newSphere.radius - radius * radius;
+//}
+//float BoundingSphere::getSize() const {
+//	return ((float)1.333333) * PI * radius * radius * radius;
+//}
+//
+//// Bounding Volume Tree for object tree
+//template<class BoundingVolumeClass>
+//BVHNode<BoundingVolumeClass>::BVHNode(BVHNode* parent, const BoundingVolumeClass& volume, RigidBody* body = NULL) {
+//	children[0] = children[1] = NULL;
+//}
+//template<class BoundingVolumeClass>
+//bool BVHNode<BoundingVolumeClass>::isLeaf() const {
+//	return body != NULL;
+//}
+//template<class BoundingVolumeClass>
+//bool BVHNode<BoundingVolumeClass>::overlaps(const BVHNode<BoundingVolumeClass>* other) const
+//{
+//	return volume->overlaps(other->volume);
+//}
+//template<class BoundingVolumeClass>
+//unsigned BVHNode<BoundingVolumeClass>::getPotentialContacts(PotentialContact* contacts, unsigned limit) const {
+//	// Check if leaf node or have no more room for contacts
+//	if (isLeaf() || limit == 0) return 0;
+//
+//	// Get potential contacts of one of children with other
+//	return children[0]->getPotentialContactsWith(children[1], contacts, limit);
+//}
+//template<class BoundingVolumeClass>
+//unsigned BVHNode<BoundingVolumeClass>::getPotentialContactsWith(const BVHNode<BoundingVolumeClass>* other, PotentialContact* contacts, unsigned limit) const {
+//	// Check if we don't overlap or there is no room to report contacts
+//	if (!overlaps(other) || limit == 0) return 0;
+//
+//	// If both are leaf nodes, then we have potential contact
+//	if (isLeaf() && other->isLeaf()) {
+//		contacts->body[0] = body;
+//		contacts->body[1] = other->body;
+//		return 1;
+//	}
+//
+//	// Determine which node to descend into,
+//	// if either is a leaf, then we descend other, otherwise
+//	// Descend into one with largest size
+//	if (other->isLeaf() || (!isLeaf() && volume->getSize() >= other->volume->getSize())) {
+//		// Recurse into ourself
+//		unsigned count = children[0]->getPotentialContactsWith(other, contacts, limit);
+//
+//		// Check whether we have enough slots to do the other side too
+//		if (limit > count) {
+//			return count + children[1]->getPotentialContactsWith(other, contacts + count, limit - count);
+//		}
+//		else {
+//			return count;
+//		}
+//	}
+//	else {
+//		// Recurse into other node
+//		unsigned count = getPotentialContactsWith(other->children[0], contacts, limit);
+//
+//		// Check whther we have enough slots to do the other side too
+//		if (limit > count) {
+//			return count + getPotentialContactsWith(other->children[1], contacts + count, limit - count);
+//		}
+//		else {
+//			return count;
+//		}
+//	}
+//
+//
+//}
+//template<class BoundingVolumeClass>
+//void BVHNode<BoundingVolumeClass>::insert(RigidBody* newBody, const BoundingVolumeClass& newVolume) {
+//	// If leaf, only option is to spawn two new children and place new body in one
+//	if (isLeaf()) {
+//		// Child 1 is us
+//		children[0] = new BVHNode<BoundingVolumeClass>(
+//			this, volume, body
+//		);
+//
+//		// Child 2 is new body
+//		children[1] = new BVHNode<BoundingVolumeClass>(
+//			this, newVolume, newBody
+//		);
+//
+//		// Now we loosen the body, no longer a leaf
+//		this->body = NULL;
+//
+//		// Recalculate bounding volume
+//		recalculateBoundingVolume();
+//	}
+//	// Not a leaf, need to work out which child keeps inserted body and give to whoever grows least
+//	else {
+//		if (children[0]->volume.getGrowth(newVolume) < children[1]->volume.getGrowth(newVolume)) {
+//			children[0]->insert(newBody, newVolume);
+//		}
+//		else {
+//			children[1]->insert(newBody, newVolume);
+//		}
+//	}
+//}
+//template<class BoundingVolumeClass>
+//BVHNode<BoundingVolumeClass>::~BVHNode<BoundingVolumeClass>() {
+//	// If no parent, ignore sibling processing
+//	if (parent) {
+//		// Find sibling
+//		BVHNode<BoundingVolumeClass>* sibling;
+//		if (parent->children[0] == this) {
+//			sibling = parent->children[1];
+//		}
+//		else {
+//			sibling = parent->children[0];
+//		}
+//
+//		// Write its data to our parent
+//		parent->volume = sibling->volume;
+//		parent->body = sibling->body;
+//		parent->children[0] = sibling->children[0];
+//		parent->children[1] = sibling->children[1];
+//
+//		// Delete sibling (blank its parent and children now not need to process them)
+//		sibling->parent = NULL;
+//		sibling->body = NULL;
+//		sibling->children[0] = NULL;
+//		sibling->children[1] = NULL;
+//		delete sibling;
+//
+//		// Recalculate parent bounding volyme
+//		parent->recalculateBoundingVolume();
+//	}
+////}
+//	// Delete out children (again we remove their parent data so dont process siblings)
+//	if (children[0]) {
+//		children[0]->parent = NULL;
+//		delete children[0];
+//	}
+//
+//	if (children[1]) {
+//		children[1]->parent = NULL;
+//		delete children[1];
+//	}
+//}
+//template<class BoundingVolumeClass>
+//void BVHNode<BoundingVolumeClass>::recalculateBoundingVolume(bool recurse = true) {
+//	if (isLeaf()) {
+//		return;
+//	}
+//
+//	// Use Bounding volume combining constructor
+//	volume = BoundingVolumeClass(children[0]->volume, children[1]->volume);
+//
+//	// Recurse up tree
+//	if (parent) parent->recalculateBoundingVolume(true);
